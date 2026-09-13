@@ -1,12 +1,14 @@
-name: Windows Build
+name: Windows Build and Release
 on:
   workflow_dispatch:
   push:
     branches:
       - main
       - master
+    tags:
+      - "*"
 permissions:
-  contents: read
+  contents: write
 jobs:
   windows-build:
     name: Build for Windows
@@ -38,3 +40,29 @@ jobs:
           name: seg7-clock-reader-windows-x64
           path: release/*.zip
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $zip = (Get-ChildItem release/*.zip | Select-Object -First 1).FullName
+          $notes = @"
+          7-Segment Clock Reader for OBS Studio (Windows x64).
+
+          Install: extract the zip so that the ``seg7-clock-reader`` folder ends up in
+          ``%APPDATA%\obs-studio\plugins\`` (create the ``plugins`` folder if it does not
+          exist), then restart OBS.
+
+          Usage: add a Text (FreeType 2) source, add the filter "7-Segment Clock Reader"
+          to your video source, pick the Text source in the filter and click
+          "Select ROI from video...".
+
+          Requires OBS Studio 32.x (x64).
+          "@
+          gh release create $tag $zip --title "7-Segment Clock Reader $tag" --notes $notes --verify-tag
+          if ($LASTEXITCODE -ne 0) {
+            gh release upload $tag $zip --clobber
+          }

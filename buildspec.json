@@ -38,7 +38,7 @@
     },
     "name": "seg7-clock-reader",
     "displayName": "7-Segment Clock Reader",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "author": "kpaliga",
     "website": "https://github.com/kpaliga",
     "email": "kpaliga@users.noreply.github.com"
