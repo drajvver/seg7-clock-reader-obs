@@ -1,59 +1,137 @@
-# OBS Plugin Template
+# 7-Segment Clock Reader dla OBS Studio
 
-## Introduction
+Wtyczka do OBS Studio, która w czasie rzeczywistym odczytuje zegar 7-segmentowy
+(np. zegar meczowy z transmisji sportowej) z wybranego obszaru źródła wideo
+i wyświetla wynik jako **zwykły tekst** — w dowolnym źródle tekstowym OBS.
 
-The plugin template is meant to be used as a starting point for OBS Studio plugin development. It includes:
+Zamiast OCR używa deterministycznego dekodowania segmentów (bez modeli AI),
+dlatego nie daje fałszywych odczytów. Zegar zatrzymany w trakcie meczu jest
+poprawnie rozpoznawany — wtyczka trzyma ostatnią wartość i wznawia odczyt,
+gdy zegar ruszy ponownie.
 
-* Boilerplate plugin source code
-* A CMake project file
-* GitHub Actions workflows and repository actions
+## Funkcje
 
-## Supported Build Environments
+- **Filtr wideo** nakładany na dowolne źródło (kamera, Media Source, stream) —
+  nie modyfikuje obrazu, tylko z niego czyta.
+- **Wybór obszaru (ROI)** z podglądu na żywo: przeciągnij ramkę, scroll = zoom,
+  prawy przycisk = przesuwanie, auto-dopasowanie do ciemnego panelu zegara.
+- **Wynik jako zwykły tekst**: filtr aktualizuje wybrany źródło typu
+  *Tekst (FreeType 2)* / *Tekst (GDI+)* — możesz je stylizować, pozycjonować
+  i używać w dowolnym miejscu nakładki.
+- **Odporność na błędy**: walidacja segmentów + filtr czasowy — złe odczyty
+  są odrzucane, zatrzymany zegar „trzyma” wartość, brak obrazu = ostatnia
+  wartość (status LOST).
+- **Opcje**: tylko sekundy (bez dziesiątek), kierunek odliczania
+  (auto / w górę / w dół), auto-dopasowanie ROI.
+- Obszar ROI skaluje się automatycznie przy zmianie rozdzielczości źródła.
 
-| Platform  | Tool   |
-|-----------|--------|
-| Windows   | Visual Studio 17 2022 |
-| macOS     | XCode 16.0 |
-| Windows, macOS  | CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3 |
-| Ubuntu 24.04 | `ninja-build` |
-| Ubuntu 24.04 | `pkg-config`
-| Ubuntu 24.04 | `build-essential` |
+## Wymagania
 
-## Quick Start
+- OBS Studio **32.x** (x64) — zbudowane i testowane z OBS 32.2.2
+- Windows 10/11 x64 (testowane)/ macOS 12+ Apple Silicon (patrz sekcja macOS)
 
-An absolute bare-bones [Quick Start Guide](https://github.com/obsproject/obs-plugintemplate/wiki/Quick-Start-Guide) is available in the wiki.
+## Instalacja (Windows)
 
-## Documentation
+1. Pobierz `seg7-clock-reader-1.0.0-windows-x64.zip` z sekcji
+   [Releases](../../releases).
+2. Wypakuj tak, aby folder `seg7-clock-reader` znalazł się w:
+   `%APPDATA%\obs-studio\plugins\`
+   (czyli `...\plugins\seg7-clock-reader\bin\64bit\seg7-clock-reader.dll`).
+   Folder `plugins` utwórz, jeśli nie istnieje.
+3. Uruchom ponownie OBS.
 
-All documentation can be found in the [Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
+Alternatywnie (instalacja globalna, wymaga praw administratora): rozpakuj do
+`C:\Program Files\obs-studio\` i scal foldery.
 
-Suggested reading to get up and running:
+## Użycie
 
-* [Getting started](https://github.com/obsproject/obs-plugintemplate/wiki/Getting-Started)
-* [Build system requirements](https://github.com/obsproject/obs-plugintemplate/wiki/Build-System-Requirements)
-* [Build system options](https://github.com/obsproject/obs-plugintemplate/wiki/CMake-Build-System-Options)
+1. Dodaj źródło **Tekst (FreeType 2)** do sceny — to będzie twój zegar.
+2. Dodaj źródło wideo (przechwycenie, Media Source, itp.).
+3. Kliknij prawym na źródło wideo → **Filtry** → **+** → **7-Segment Clock Reader**.
+4. W ustawieniach filtra:
+   - **Źródło tekstu** — wybierz dodane wcześniej źródło tekstu,
+   - **Wybierz ROI z wideo…** — przeciągnij ramkę wokół zegara
+     (scroll = zoom, prawy przycisk = przesuwanie, dwuklik = reset);
+     opcja *Auto-dopasuj ROI do panelu wyświetlacza* dociągnie zaznaczenie
+     do ciemnego panelu zegara,
+   - **Pokaż tylko sekundy** (zalecane), **Kierunek zegara** (Auto).
+5. Gotowe — źródło tekstu aktualizuje się na żywo (1×/s lub 10×/s przy
+   dziesiątych częściach sekundy), a podczas zatrzymania zegara trzyma
+   ostatnią wartość.
 
-## GitHub Actions & CI
+## Budowanie ze źródeł
 
-Default GitHub Actions workflows are available for the following repository actions:
+### Windows
 
-* `push`: Run for commits or tags pushed to `master` or `main` branches.
-* `pr-pull`: Run when a Pull Request has been pushed or synchronized.
-* `dispatch`: Run when triggered by the workflow dispatch in GitHub's user interface.
-* `build-project`: Builds the actual project and is triggered by other workflows.
-* `check-format`: Checks CMake and plugin source code formatting and is triggered by other workflows.
+Wymagane: Visual Studio 2022 (obciążenie „Desktop development with C++”),
+CMake 3.28+, internet (zależności pobierane automatycznie).
 
-The workflows make use of GitHub repository actions (contained in `.github/actions`) and build scripts (contained in `.github/scripts`) which are not needed for local development, but might need to be adjusted if additional/different steps are required to build the plugin.
+```powershell
+cmake --preset windows-x64
+cmake --build --preset windows-x64 --config RelWithDebInfo
+cmake --install build_x64 --config RelWithDebInfo --prefix release\RelWithDebInfo
+```
 
-### Retrieving build artifacts
+Gotowy plugin: `release\RelWithDebInfo\obs-plugins\64bit\seg7-clock-reader.dll`
+(+ `data\obs-plugins\seg7-clock-reader\`).
 
-Successful builds on GitHub Actions will produce build artifacts that can be downloaded for testing. These artifacts are commonly simple archives and will not contain package installers or installation programs.
+Alternatywnie skrypty CI:
 
-### Building a Release
+```powershell
+.\.github\scripts\Build-Windows.ps1   -Target x64 -Configuration RelWithDebInfo
+.\.github\scripts\Package-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+```
 
-To create a release, an appropriately named tag needs to be pushed to the `main`/`master` branch using semantic versioning (e.g., `12.3.4`, `23.4.5-beta2`). A draft release will be created on the associated repository with generated installer packages or installation programs attached as release artifacts.
+Wynik: `release\seg7-clock-reader-1.0.0-windows-x64.zip`.
 
-## Signing and Notarizing on macOS
+### macOS (Apple Silicon)
 
-Basic concepts of codesigning and notarization on macOS are explained in the correspodning [Wiki article](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS) which has a specific section for the [GitHub Actions setup](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS#setting-up-code-signing-for-github-actions).
+Wymagane: Xcode Command Line Tools, zainstalowany OBS z Homebrew.
+
+```bash
+make            # buduje build/seg7-clock-reader.plugin
+make install    # instaluje do ~/Library/Application Support/obs-studio/plugins/
+```
+
+Makefile linkuje z frameworkami zainstalowanego OBS (`/Applications/OBS.app`),
+nagłówki pobiera z odpowiadającego źródła obs-studio (automatycznie do `.deps/`).
+
+### CI
+
+Push do `main` buduje plugin dla Windows (GitHub Actions).
+Tag w formacie `1.2.3` tworzy wydanie z gotowym zipem.
+
+## Jak to działa
+
+1. Filtr odbiera klatki źródła (płaszczyzna luminancji — bez konwersji kolorów).
+2. ROI jest progowany, wyznaczane są glify (cyfry, kropki, separator),
+   odrzucana ramka/bezel i śmieci.
+3. Dla każdej cyfry sprawdzane jest pokrycie 7 segmentów (a–g) wzdłuż
+   pochyłych osi; wynik musi pasować do wzorca cyfry z zapasem (margin).
+4. Parser mapuje cyfry na czas `M:SS.t` i odrzuca niemożliwe wartości
+   (np. sekundy ≥ 60).
+5. Tracker czasowy odrzuca skoki/fałszywe odczyty, obsługuje kierunek,
+   zatrzymania zegara (status STOPPED) i resynchronizację po ucięciach.
+
+Rdzeń (`clock_core.cpp`) jest przenośnym C++17 bez zależności — ta sama logika
+została zwalidowana 1:1 z referencyjną implementacją w Pythonie (720/720
+klatek, 537/537 zdarzeń trackera).
+
+## Struktura repozytorium
+
+```
+obs-plugin/
+  src/            źródła pluginu (filtr, picker ROI, rdzeń dekodera)
+  mac/            Info.plist + shim (build macOS)
+  Makefile        build macOS (lokalny)
+  .github/        workflow Windows + akcje CI (z obs-plugintemplate)
+  BUILD-WINDOWS.txt  instrukcja budowania na Windows
+cpp/              samodzielny harness CLI + testy zgodności z Pythonem
+tools/            narzędzia (skan wideo, szukanie ROI, test e2e przez WebSocket)
+seg7clock/        referencyjna implementacja w Pythonie (aplikacja desktopowa)
+tests/            testy jednostkowe (fixtures + tracker + wideo end-to-end)
+```
+
+## Licencja
+
+GPL-2.0 (dziedziczona z obs-plugintemplate).
