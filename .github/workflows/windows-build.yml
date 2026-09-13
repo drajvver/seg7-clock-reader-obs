@@ -1,0 +1,40 @@
+name: Windows Build
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+permissions:
+  contents: read
+jobs:
+  windows-build:
+    name: Build for Windows
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build Plugin
+        uses: ./.github/actions/build-plugin
+        with:
+          target: x64
+          config: RelWithDebInfo
+
+      - name: Package Plugin
+        uses: ./.github/actions/package-plugin
+        with:
+          target: x64
+          config: RelWithDebInfo
+          package: true
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: seg7-clock-reader-windows-x64
+          path: release/*.zip
+          if-no-files-found: error
