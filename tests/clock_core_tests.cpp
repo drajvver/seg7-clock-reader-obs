@@ -1,7 +1,9 @@
 #include "clock_core.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -26,6 +28,73 @@ seg7::Reading reading(double value)
     r.display = std::to_string(value);
     r.raw = r.display;
     return r;
+}
+
+void initialize(seg7::ClockTracker &tracker, double value, double timestamp = 0.0)
+{
+    tracker.update(reading(value), timestamp - 0.2);
+    tracker.update(reading(value), timestamp - 0.1);
+    check(tracker.update(reading(value), timestamp).has_value, "initial clock confirmed");
+}
+
+#ifndef CLOCK_TEST_FIXTURE_DIR
+#define CLOCK_TEST_FIXTURE_DIR "tests/fixtures"
+#endif
+
+void test_broadcast_frames()
+{
+    struct Example { const char *file; const char *expected; };
+    const Example examples[] = {
+        {"clock-0-58.pgm", "0:58"}, {"clock-1-02.pgm", "1:02"},
+        {"clock-1-07.pgm", "1:07"}, {"clock-1-12.pgm", "1:12"},
+        {"clock-1-17.pgm", "1:17"}, {"clock-1-22.pgm", "1:22"},
+        {"clock-1-27.pgm", "1:27"}, {"clock-1-31.pgm", "1:31"},
+        {"clock-1-36.pgm", "1:36"}, {"clock-1-39.pgm", "1:39"},
+        {"clock-1-41.pgm", "1:41"}, {"clock-1-44.pgm", "1:44"},
+        {"clock-1-49.pgm", "1:49"}, {"clock-1-54.pgm", "1:54"},
+        {"clock-1-59.pgm", "1:59"}, {"clock-2-04.pgm", "2:04"},
+        {"clock-3-55.pgm", "3:55"}, {"clock-6-24.pgm", "6:24"},
+        {"clock-9-11.pgm", "9:11"}, {"clock-11-03.pgm", "11:03"},
+        {"clock-12-36.pgm", "12:36"}, {"clock-14-44.pgm", "14:44"},
+        {"clock-17-05.pgm", "17:05"}, {"clock-0-42.pgm", "0:42"},
+        {"clock-6-32.pgm", "6:32"}, {"clock-10-58.pgm", "10:58"},
+        {"clock-15-28.pgm", "15:28"},
+        {"no-clock.pgm", ""}, {"blank.pgm", ""},
+    };
+    for (const auto &example : examples) {
+        std::ifstream file(std::string(CLOCK_TEST_FIXTURE_DIR) + "/" + example.file,
+                           std::ios::binary);
+        std::string magic;
+        int width = 0, height = 0, max_value = 0;
+        file >> magic >> width >> height >> max_value;
+        if (!file || magic != "P5" || width != 113 || height != 33 || max_value != 255) {
+            check(false, example.file);
+            continue;
+        }
+        file.get();
+        std::vector<uint8_t> pixels((size_t)width * height);
+        file.read(reinterpret_cast<char *>(pixels.data()), pixels.size());
+        check((bool)file, "complete broadcast fixture");
+        auto result = seg7::decode(pixels.data(), width, height, width);
+        bool correct = *example.expected ? result.valid && result.display == example.expected
+                                          : !result.valid;
+        if (!correct)
+            std::fprintf(stderr, "%s: expected %s, got %s (%s)\n", example.file,
+                         example.expected, result.raw.c_str(), result.reason.c_str());
+        check(correct, example.file);
+        if (*example.expected) {
+            std::vector<uint8_t> padded((size_t)(width + 4) * (height + 4), pixels[width * 16]);
+            for (int y = 0; y < height; ++y)
+                std::copy_n(pixels.data() + (size_t)y * width, width,
+                            padded.data() + (size_t)(y + 2) * (width + 4) + 2);
+            auto padded_result = seg7::decode(padded.data(), width + 4, height + 4, width + 4);
+            check(padded_result.valid && padded_result.display == example.expected,
+                  (std::string(example.file) + " with a small selection margin").c_str());
+            auto borderless = seg7::decode(pixels.data() + width, width, height - 3, width);
+            check(borderless.valid && borderless.display == example.expected,
+                  (std::string(example.file) + " without the overlay border").c_str());
+        }
+    }
 }
 
 // Draw connected, rectangular LED segments, including the shorter lit bounds
@@ -128,13 +197,13 @@ void test_decoder()
 void test_stopped_clock()
 {
     seg7::ClockTracker tracker(seg7::ClockTracker::Direction::Down);
-    tracker.update(reading(60), 0);
+    initialize(tracker, 60);
     check(!tracker.update(reading(60), 1).stopped, "running before stop interval");
     check(tracker.update(reading(60), 2).stopped, "stopped clock reported");
     auto s = tracker.update({}, 6);
     check(s.stale && !s.stopped && s.value == 60, "lost clock is stale and holds value");
     tracker.reset();
-    tracker.update(reading(60), 0);
+    initialize(tracker, 60);
     tracker.update(reading(60), 2);
     tracker.update(reading(59), 2.01);
     s = tracker.update(reading(59), 2.2);
@@ -146,7 +215,7 @@ void test_stopped_clock()
 void test_resync()
 {
     seg7::ClockTracker tracker;
-    tracker.update(reading(60), 0);
+    initialize(tracker, 60);
     tracker.update(reading(500), 0.01);
     tracker.update({}, 0.2);
     auto s = tracker.update(reading(500), 0.5);
@@ -158,7 +227,7 @@ void test_resync()
                            seg7::ClockTracker::Direction::Down,
                            seg7::ClockTracker::Direction::Up}) {
         seg7::ClockTracker moving(dir);
-        moving.update(reading(300), 0);
+        initialize(moving, 300);
         const double sign = dir == seg7::ClockTracker::Direction::Up ? 1.0 : -1.0;
         for (int i = 1; i <= 10; ++i)
             s = moving.update(reading(60 + sign * i / 10.0), i / 10.0);
@@ -168,13 +237,13 @@ void test_resync()
     }
 
     seg7::ClockTracker noisy;
-    noisy.update(reading(60), 0);
+    initialize(noisy, 60);
     for (int i = 1; i <= 30; ++i)
         s = noisy.update(reading(i % 2 ? 500 : 800), i / 10.0);
     check(s.value == 60, "inconsistent outliers never resync");
 
     seg7::ClockTracker drifting;
-    drifting.update(reading(60), 0);
+    initialize(drifting, 60);
     for (int i = 1; i <= 60; ++i)
         s = drifting.update(reading(500 + i * 0.2), i / 60.0);
     check(s.value == 60, "candidate cannot accumulate implausibly fast motion");
@@ -183,7 +252,7 @@ void test_resync()
 void test_invalid_readings()
 {
     seg7::ClockTracker tracker;
-    tracker.update(reading(60), 0);
+    initialize(tracker, 60);
     auto s = tracker.update(reading(std::numeric_limits<double>::quiet_NaN()), 0.5);
     check(s.value == 60, "NaN cannot replace the held clock");
     s = tracker.update(reading(-1), 1);
@@ -192,11 +261,42 @@ void test_invalid_readings()
     check(!tracker.update(reading(std::numeric_limits<double>::infinity()), 0).has_value,
           "infinite clock cannot initialize the tracker");
 }
+
+void test_initial_confirmation()
+{
+    seg7::ClockTracker tracker;
+    check(!tracker.update(reading(80 * 60 + 53), 0).has_value,
+          "a single false clock cannot initialize the output");
+    check(!tracker.update(reading(87), 0.1).has_value, "different candidate restarts confirmation");
+    check(!tracker.update(reading(87), 0.2).has_value, "two frames are not sufficient");
+    auto state = tracker.update(reading(87), 0.3);
+    check(state.has_value && state.value == 87, "consistent real clock initializes the output");
+    check(tracker.resyncs == 0, "initial confirmation is not a resync");
+
+    tracker.reset();
+    tracker.update(reading(87), 0);
+    tracker.update(reading(87), 0.1);
+    tracker.update({}, 0.2);
+    check(!tracker.update(reading(87), 0.3).has_value,
+          "invalid frame breaks initial confirmation");
+    tracker.reset();
+    tracker.update(reading(87), 0);
+    tracker.update(reading(87), 0);
+    check(!tracker.update(reading(87), 0).has_value, "duplicate timestamp cannot confirm a clock");
+    tracker.reset();
+    tracker.update(reading(87), 0);
+    tracker.update(reading(86.9), 0.1);
+    state = tracker.update(reading(86.8), 0.2);
+    check(state.has_value && std::abs(state.value - 86.8) < 0.001,
+          "moving tenths clock can initialize");
+}
 }
 
 int main()
 {
     test_decoder();
+    test_broadcast_frames();
+    test_initial_confirmation();
     test_stopped_clock();
     test_resync();
     test_invalid_readings();

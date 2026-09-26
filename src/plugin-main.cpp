@@ -257,11 +257,19 @@ void process_frame(ClockFilter *f, const struct obs_source_frame *frame)
     if (state.has_value) {
         f->last_display = state.display;
         std::string text = f->seconds_only ? seg7::format_seconds_only(state.display) : state.display;
-        char buf[320];
-        std::snprintf(buf, sizeof(buf), "Odczyt: %s  pewność: %.0f%%%s", text.c_str(),
-                      state.confidence * 100.0, state.stale ? "  (zegar niewidoczny; zachowano ostatni odczyt)"
-                      : state.stopped ? "  (zegar zatrzymany)" : "");
-        f->status = buf;
+        if (!reading.valid) {
+            f->status = "Brak nowego odczytu. Zachowano poprzedni czas: " + text +
+                        ". Powód: " + reading.reason + ".";
+        } else if (state.display != reading.display) {
+            f->status = "Potwierdzam nowy odczyt: " + reading.display +
+                        ". Zachowano poprzedni czas: " + text + ".";
+        } else {
+            char buf[320];
+            std::snprintf(buf, sizeof(buf), "Odczyt: %s  pewność: %.0f%%%s", text.c_str(),
+                          state.confidence * 100.0,
+                          state.stopped ? "  (zegar zatrzymany)" : "");
+            f->status = buf;
+        }
     } else {
         f->status = reading.valid ? "Czekam na stabilny odczyt zegara."
                                    : "Nie udało się odczytać zegara: " + reading.reason;

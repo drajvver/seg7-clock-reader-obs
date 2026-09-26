@@ -2,6 +2,11 @@
 #include "../src/plugin-main.cpp"
 
 #include <limits>
+#include <fstream>
+
+#ifndef CLOCK_TEST_FIXTURE_DIR
+#define CLOCK_TEST_FIXTURE_DIR "tests/fixtures"
+#endif
 
 namespace {
 int failures = 0;
@@ -76,6 +81,63 @@ void fake_text_destroy(void *data) { delete static_cast<int *>(data); }
 void fake_text_update(void *, obs_data_t *) { ++text_updates; }
 const char *fake_text_name(void *) { return "Test text"; }
 
+void test_broadcast_publication(obs_source_t *text_source)
+{
+    auto load = [](const char *name) {
+        std::ifstream file(std::string(CLOCK_TEST_FIXTURE_DIR) + "/" + name, std::ios::binary);
+        std::string magic;
+        int width = 0, height = 0, max_value = 0;
+        file >> magic >> width >> height >> max_value;
+        if (!file || magic != "P5" || width != 113 || height != 33 || max_value != 255)
+            return std::vector<uint8_t>{};
+        file.get();
+        std::vector<uint8_t> pixels((size_t)width * height);
+        file.read(reinterpret_cast<char *>(pixels.data()), pixels.size());
+        if (!file)
+            pixels.clear();
+        return pixels;
+    };
+    auto pixels = load("clock-1-27.pgm");
+    auto missing = load("no-clock.pgm");
+    check(!pixels.empty() && !missing.empty(), "broadcast publication fixtures available");
+    if (pixels.empty() || missing.empty())
+        return;
+    ClockFilter filter;
+    filter.source = text_source;
+    filter.target = "clock-output";
+    filter.roi_w = 113;
+    filter.roi_h = 33;
+    obs_source_frame frame{};
+    frame.width = frame.linesize[0] = 113;
+    frame.height = 33;
+    frame.format = VIDEO_FORMAT_Y800;
+    frame.data[0] = pixels.data();
+    const int before = text_updates;
+    for (int i = 0; i < 3; ++i) {
+        frame.timestamp = 1000000000ULL + i * 100000000ULL;
+        clock_filter_video(&filter, &frame);
+        clock_filter_tick(&filter, 0.1f);
+        if (i < 2)
+            check(text_updates == before, "unconfirmed first frames are not published");
+    }
+    check(text_updates == before + 1 && filter.last_text == "1:27",
+          "actual broadcast clock reaches OBS text after confirmation");
+    obs_data_t *settings = obs_source_get_settings(text_source);
+    check(std::string(obs_data_get_string(settings, "text")) == "1:27",
+          "OBS text contains the actual broadcast time");
+    obs_data_release(settings);
+
+    frame.data[0] = missing.data();
+    frame.timestamp = 6000000000ULL;
+    clock_filter_video(&filter, &frame);
+    clock_filter_tick(&filter, 0.1f);
+    check(text_updates == before + 1 && filter.last_text == "1:27",
+          "lost clock preserves the last confirmed text");
+    check(filter.status.find("Brak nowego odczytu") != std::string::npos &&
+          filter.status.find("pewność") == std::string::npos,
+          "held output does not present an old confidence as a current reading");
+}
+
 void test_obs_callbacks()
 {
     check(obs_startup("pl-PL", nullptr, nullptr), "OBS startup");
@@ -149,6 +211,7 @@ void test_obs_callbacks()
     clock_filter_update(&filter, settings);
     check(filter.roi_x == MAX_FRAME_SIZE && filter.roi_w == 0 && filter.direction == -1,
           "settings are bounded before narrowing to int");
+    test_broadcast_publication(text_source);
     obs_data_release(settings);
     obs_source_release(text_source);
     obs_shutdown();

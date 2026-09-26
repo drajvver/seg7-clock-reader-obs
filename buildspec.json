@@ -38,7 +38,7 @@
     },
     "name": "seg7-clock-reader",
     "displayName": "Czytnik zegara 7-segmentowego",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "author": "kpaliga",
     "website": "https://github.com/kpaliga",
     "email": "kpaliga@users.noreply.github.com"

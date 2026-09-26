@@ -72,6 +72,7 @@ public:
     int invalid_frames = 0;
 
     double tolerance = 0.3;
+    double initial_confirm_seconds = 0.15;
     double resync_seconds = 0.15;
     double resync_large_seconds = 0.4;
     double resync_frozen_seconds = 0.6;
@@ -104,6 +105,7 @@ private:
     double pending_start_ = 0.0;
     double pending_t_ = 0.0;
     int pending_dir_ = 0;
+    unsigned pending_frames_ = 0;
     bool has_last_change_ = false;
     double last_change_t_ = 0.0;
 };

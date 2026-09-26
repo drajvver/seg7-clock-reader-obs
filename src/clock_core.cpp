@@ -107,6 +107,54 @@ bool valid_image(const uint8_t *gray, int width, int height, int stride) {
            (uint64_t)width * height <= (uint64_t)std::numeric_limits<int>::max();
 }
 
+void remove_horizontal_borders(std::vector<uint8_t> &mask, int width, int height) {
+    // Broadcast overlays often have a thin, bright frame. Compression can join
+    // that frame to the digits, so remove long edge lines before labelling.
+    // Small holes are allowed in a line, but normal gaps between digits are not.
+    int top = height, bottom = -1;
+    for (int y = 0; y < height; ++y) {
+        const uint8_t *row = mask.data() + (size_t)y * width;
+        if (std::any_of(row, row + width, [](uint8_t pixel) { return pixel != 0; })) {
+            top = std::min(top, y);
+            bottom = y;
+        }
+    }
+    const int content_height = bottom - top + 1;
+    const int edge = std::max(1, content_height / 8);
+    const int max_gap = std::max(2, content_height / 8);
+    for (int y = top; y <= bottom; ++y) {
+        if (y >= top + edge && y <= bottom - edge)
+            continue;
+        uint8_t *row = mask.data() + (size_t)y * width;
+        int first = -1, last = -1, longest = 0;
+        for (int x = 0; x < width; ++x) {
+            if (!row[x])
+                continue;
+            if (first < 0 || x - last > max_gap + 1)
+                first = x;
+            last = x;
+            longest = std::max(longest, last - first + 1);
+        }
+        if (longest <= 0.75 * content_height)
+            continue;
+        int inward_y = y + (y - top < content_height / 2 ? 1 : -1) * std::max(1, content_height / 16);
+        inward_y = std::clamp(inward_y, 0, height - 1);
+        const uint8_t *inward = mask.data() + (size_t)inward_y * width;
+        int lit = 0, supported = 0;
+        for (int x = 0; x < width; ++x) {
+            if (row[x]) {
+                ++lit;
+                supported += inward[x] || (x > 0 && inward[x - 1]) ||
+                             (x + 1 < width && inward[x + 1]);
+            }
+        }
+        // A real horizontal digit segment continues into the image. A thin
+        // frame crosses the otherwise empty gaps between the glyphs.
+        if (supported < 0.8 * lit)
+            std::fill(row, row + width, 0);
+    }
+}
+
 bool preprocess(const uint8_t *gray, int width, int height, int stride, std::vector<uint8_t> &mask) {
     if (!valid_image(gray, width, height, stride))
         return false;
@@ -407,8 +455,10 @@ std::vector<Comp> filter_components(const std::vector<uint8_t> &mask, int w, int
         int cw = c.x1 - c.x0, ch = c.y1 - c.y0;
         if (cw > 0.85 * w && ch > 0.85 * h && c.area < 0.5 * cw * ch)
             continue;
-        if (ch > 0.7 * h && cw <= std::max(2, (int)(0.07 * w)) &&
-            (c.x0 <= 0.08 * w || c.x1 >= 0.92 * w))
+        // A slanted 1 near the right edge is a digit, not a frame border. Only
+        // discard nearly full-height, solid, thin lines touching the crop edge.
+        if (ch > 0.9 * h && cw <= std::max(2, (int)(0.05 * ch)) &&
+            c.area >= 0.85 * cw * ch && (c.x0 <= 1 || c.x1 >= w - 1))
             continue;
         kept.push_back(c);
     }
@@ -445,9 +495,11 @@ std::vector<Comp> filter_components(const std::vector<uint8_t> &mask, int w, int
 bool rects_mergeable(const Rect &a, const Rect &b, int max_gap) {
     int vgap = std::max(a.y, b.y) - std::min(a.y + a.h, b.y + b.h);
     int hover = std::min(a.x + a.w, b.x + b.w) - std::max(a.x, b.x);
-    int aw = a.w, bw = b.w;
-    int wider = std::max(aw, bw), narrower = std::min(aw, bw);
-    return vgap <= max_gap && hover >= 0.4 * narrower && narrower >= 0.4 * wider;
+    int narrower = std::min(a.w, b.w), wider = std::max(a.w, b.w);
+    // The lower stroke of a 7 can be much narrower than its top. A small break
+    // in an LED segment must not turn it into a separate digit or decimal dot.
+    return vgap <= max_gap && hover >= 0.4 * narrower &&
+           (narrower >= 0.4 * wider || vgap >= 0);
 }
 
 std::vector<Rect> merge_glyphs(std::vector<Rect> glyphs, int max_gap = 2) {
@@ -662,6 +714,7 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
         r.reason = "cyfry są za mało widoczne; zaznacz wyraźny zegar na ciemnym tle";
         return r;
     }
+    remove_horizontal_borders(mask, width, height);
     std::vector<Comp> comps = filter_components(mask, width, height);
     if (comps.empty()) {
         r.reason = "nie znaleziono cyfr; zaznacz sam zegar bez otoczenia";
@@ -861,6 +914,7 @@ void ClockTracker::reset() {
     t_ = 0.0;
     confidence_ = 0.0;
     has_pending_ = false;
+    pending_frames_ = 0;
     has_last_change_ = false;
     up_votes_ = down_votes_ = 0;
     dir_ = direction_ == Direction::Up ? 1 : direction_ == Direction::Down ? -1 : 0;
@@ -950,18 +1004,16 @@ TrackState ClockTracker::update(const Reading &reading, double t) {
         return state(std::isfinite(t) ? t : t_, false);
     }
     double value = std::round(reading.value_seconds * 1000.0) / 1000.0;
-    if (!has_value_) {
-        bool changed = accept(value, reading, t);
-        return state(t, changed);
+    if (has_value_) {
+        double dt = std::max(t - t_, 0.001);
+        double delta = value - value_;
+        if (plausible(delta, dt)) {
+            vote_direction(delta);
+            bool changed = accept(value, reading, t);
+            return state(t, changed);
+        }
+        rejected++;
     }
-    double dt = std::max(t - t_, 0.001);
-    double delta = value - value_;
-    if (plausible(delta, dt)) {
-        vote_direction(delta);
-        bool changed = accept(value, reading, t);
-        return state(t, changed);
-    }
-    rejected++;
     double pending_delta = value - pending_;
     double pending_dt = t - pending_t_;
     int expected_dir = direction_ == Direction::Up ? 1
@@ -975,14 +1027,22 @@ TrackState ClockTracker::update(const Reading &reading, double t) {
         pending_start_value_ = value;
         pending_start_ = t;
         pending_dir_ = 0;
+        pending_frames_ = 0;
         has_pending_ = true;
     } else if (std::abs(pending_delta) > 0.05) {
         pending_dir_ = pending_delta > 0.0 ? 1 : -1;
     }
     pending_ = value;
     pending_t_ = t;
-    if (has_pending_ && (t - pending_start_) >= resync_seconds_for(pending_, t)) {
-        resyncs++;
+    pending_frames_ = std::min(pending_frames_ + 1, 3u);
+    const double confirmation = has_value_ ? resync_seconds_for(pending_, t)
+                                           : initial_confirm_seconds;
+    // Do not publish the first plausible-looking frame: an overlay border or
+    // a cut can briefly resemble a complete clock. Confirm startup as well as
+    // later large jumps, allowing a coherent moving clock during confirmation.
+    if ((has_value_ || pending_frames_ >= 3) && t - pending_start_ >= confirmation) {
+        if (has_value_)
+            resyncs++;
         dir_ = direction_ == Direction::Up ? 1 : direction_ == Direction::Down ? -1 : 0;
         up_votes_ = down_votes_ = 0;
         double pending = pending_;

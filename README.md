@@ -46,7 +46,7 @@ Nie twórz drugiego folderu `seg7-clock-reader` wewnątrz pierwszego. Przy aktua
 3. Kliknij to **źródło wideo** prawym przyciskiem myszy i wybierz **Filtry**. Pod listą **Filtry audio/wideo** kliknij **+** i wybierz **Czytnik zegara 7-segmentowego**. Filtr należy do źródła wideo, a nie do źródła tekstowego.
 4. W polu **Gdzie wyświetlić czas?** wybierz **Czas meczu**.
 5. Kliknij **Zaznacz zegar na obrazie…**. Przeciągnij lewym przyciskiem ramkę wokół minut, sekund i separatorów. Pozostaw mały margines wokół cyfr. Nie obejmuj wyniku meczu ani innych napisów.
-6. Kliknij **Użyj tego obszaru**. Po rozpoznaniu czasu pojawi się on w źródle **Czas meczu**. Ustaw jego czcionkę, kolor, rozmiar i położenie tak jak dla każdego tekstu w OBS.
+6. Kliknij **Użyj tego obszaru**. Jeśli film jest zatrzymany, uruchom go na chwilę — czytnik potrzebuje kilku kolejnych klatek, żeby potwierdzić pierwszy odczyt. Po rozpoznaniu czasu pojawi się on w źródle **Czas meczu**. Ustaw jego czcionkę, kolor, rozmiar i położenie tak jak dla każdego tekstu w OBS.
 
 W starszych wydaniach filtr może jeszcze występować pod nazwą **7-Segment Clock Reader**. Ta instrukcja opisuje interfejs bieżącego kodu.
 
@@ -74,13 +74,14 @@ Przy zmianie rozdzielczości źródła zaznaczenie skaluje się automatycznie. J
 
 | Problem | Co zrobić |
 | --- | --- |
-| Nie ma filtra na liście | Uruchom ponownie OBS, sprawdź folder instalacji i upewnij się, że dodajesz filtr do kamery lub źródła **Multimedia**. |
+| Nie ma filtra na liście | Dla kamery lub źródła **Multimedia** kliknij górny **+**, pod listą **Filtry audio/wideo**. Jeśli filtra nadal nie ma, uruchom ponownie OBS i sprawdź folder instalacji. |
 | Lista źródeł tekstowych jest pusta | Najpierw dodaj źródło **Tekst (GDI+)** lub **Tekst (FreeType 2)**. Następnie zamknij i otwórz ustawienia filtra. |
 | Pojawia się komunikat o braku obrazu | Włącz źródło; dla filmu uruchom odtwarzanie. Sprawdź, czy używasz obsługiwanego rodzaju źródła. |
 | Wtyczka odrzuca zaznaczenie | Zaznacz całe minuty i sekundy, np. `1:23`, razem z dwukropkiem. Nie zaznaczaj samych dziesiątych części sekundy. |
 | Czas jest błędny lub się nie pojawia | Zaznacz sam zegar bez innych cyfr. Sprawdź ostrość i kontrast obrazu. Wyłącz automatyczne dopasowanie, jeśli obcina fragment zegara. |
 | Odczyt w ustawieniach jest poprawny, ale tekst się nie zmienia | Sprawdź wybrane źródło tekstu oraz wyłącz czytanie tekstu z pliku. Po zmianie nazwy źródła wybierz je ponownie w filtrze. |
 | Czas stoi po zniknięciu zegara | To oczekiwane zachowanie: wtyczka zachowuje ostatni odczyt i czeka na czytelny zegar. Nie odlicza czasu samodzielnie. |
+| Widać „Brak nowego odczytu” | Wyświetlany czas pochodzi z wcześniejszych klatek. Komunikat podaje przyczynę problemu. Sprawdź zaznaczenie i uruchom film na chwilę, jeśli jest zatrzymany. |
 | Pojawia się komunikat o formacie obrazu | W ustawieniach urządzenia spróbuj formatu **NV12**, **I420** lub **BGRA**, jeśli urządzenie pozwala go wybrać. |
 
 Opis stanu na dole ustawień odświeża się po ponownym otwarciu ustawień filtra. Pokazuje ostatni odczyt, jego pewność, zatrzymanie zegara lub brak nowych klatek.
