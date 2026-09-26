@@ -6,6 +6,8 @@
 #include <QPointF>
 #include <QRectF>
 
+class QLabel;
+
 class RoiPickerDialog : public QDialog {
 public:
     explicit RoiPickerDialog(const QImage &frame, const QRect &roi, QWidget *parent = nullptr);
@@ -22,10 +24,13 @@ protected:
 
 private:
     double scale() const;
+    void update_details();
     QPointF widget_to_frame(const QPointF &pt) const;
     QPointF frame_to_widget(const QPointF &pt) const;
 
     QImage image_;
+    QWidget *canvas_ = nullptr;
+    QLabel *details_ = nullptr;
     QRect roi_;
     double zoom_ = 1.0;
     QPointF center_;

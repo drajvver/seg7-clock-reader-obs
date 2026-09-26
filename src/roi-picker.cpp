@@ -4,6 +4,7 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPushButton>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -13,38 +14,66 @@
 RoiPickerDialog::RoiPickerDialog(const QImage &frame, const QRect &roi, QWidget *parent)
     : QDialog(parent), image_(frame), roi_(roi)
 {
-    setWindowTitle("Select clock ROI");
+    setWindowTitle(QString::fromUtf8("Zaznacz zegar na obrazie"));
     resize(1100, 700);
     center_ = QPointF(image_.width() / 2.0, image_.height() / 2.0);
     if (roi_.isValid() && !roi_.isEmpty())
         center_ = QPointF(roi_.center().x(), roi_.center().y());
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setContentsMargins(8, 8, 8, 8);
     auto *hint = new QLabel(
-        "Drag to select the clock area. Scroll to zoom, right-drag to pan, double-click to reset.",
+        QString::fromUtf8("Przeciągnij lewym przyciskiem myszy ramkę wokół całego zegara: minut, sekund i separatorów.\n"
+                          "Kółko myszy przybliża obraz. Prawy przycisk przesuwa obraz. Dwuklik przywraca cały widok.\n"
+                          "Wybierasz obszar na zatrzymanej klatce. Po zatwierdzeniu odczyt będzie działał na bieżąco."),
         this);
     hint->setMargin(6);
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color: #d2d2d2;");
     layout->addWidget(hint);
-    layout->addStretch(1);
+    canvas_ = new QWidget(this);
+    canvas_->setMinimumSize(320, 220);
+    canvas_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    layout->addWidget(canvas_, 1);
+    details_ = new QLabel(this);
+    details_->setStyleSheet("color: #d2d2d2;");
+    details_->setWordWrap(true);
+    layout->addWidget(details_);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    buttons->button(QDialogButtonBox::Ok)->setText(QString::fromUtf8("Użyj tego obszaru"));
+    buttons->button(QDialogButtonBox::Cancel)->setText(QString::fromUtf8("Anuluj"));
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
     setMouseTracking(true);
+    update_details();
 }
 
 double RoiPickerDialog::scale() const
 {
-    double fit = std::min((double)width() / image_.width(), (double)height() / image_.height());
+    if (image_.isNull())
+        return 1.0;
+    double fit = std::min((double)canvas_->width() / image_.width(),
+                          (double)canvas_->height() / image_.height());
     return fit * zoom_;
+}
+
+void RoiPickerDialog::update_details()
+{
+    if (roi_.isValid() && !roi_.isEmpty()) {
+        details_->setText(QString::fromUtf8("Zaznaczony obszar: %1 × %2 pikseli. Powiększenie: %3×.")
+                              .arg(roi_.width()).arg(roi_.height()).arg(zoom_, 0, 'f', 1));
+    } else {
+        details_->setText(QString::fromUtf8("Zaznacz cały zegar, a następnie wybierz „Użyj tego obszaru”."));
+    }
 }
 
 QPointF RoiPickerDialog::frame_to_widget(const QPointF &pt) const
 {
     double s = scale();
-    return QPointF((pt.x() - center_.x()) * s + width() / 2.0,
-                   (pt.y() - center_.y()) * s + height() / 2.0);
+    QPointF view_center = QRectF(canvas_->geometry()).center();
+    return QPointF((pt.x() - center_.x()) * s + view_center.x(),
+                   (pt.y() - center_.y()) * s + view_center.y());
 }
 
 QPointF RoiPickerDialog::widget_to_frame(const QPointF &pt) const
@@ -52,8 +81,9 @@ QPointF RoiPickerDialog::widget_to_frame(const QPointF &pt) const
     double s = scale();
     if (s <= 0)
         return QPointF();
-    return QPointF((pt.x() - width() / 2.0) / s + center_.x(),
-                   (pt.y() - height() / 2.0) / s + center_.y());
+    QPointF view_center = QRectF(canvas_->geometry()).center();
+    return QPointF((pt.x() - view_center.x()) / s + center_.x(),
+                   (pt.y() - view_center.y()) / s + center_.y());
 }
 
 void RoiPickerDialog::paintEvent(QPaintEvent *event)
@@ -61,6 +91,7 @@ void RoiPickerDialog::paintEvent(QPaintEvent *event)
     Q_UNUSED(event);
     QPainter p(this);
     p.fillRect(rect(), QColor(30, 30, 30));
+    p.setClipRect(canvas_->geometry());
 
     double s = scale();
     QPointF top_left = frame_to_widget(QPointF(0, 0));
@@ -83,18 +114,14 @@ void RoiPickerDialog::paintEvent(QPaintEvent *event)
         p.setPen(QPen(QColor(255, 220, 0), 2));
         p.drawRect(w);
     }
-    p.setPen(QPen(QColor(210, 210, 210), 1));
-    p.drawText(10, height() - 10,
-               QString("ROI %1,%2 %3x%4   zoom %5x")
-                   .arg(roi_.x())
-                   .arg(roi_.y())
-                   .arg(roi_.width())
-                   .arg(roi_.height())
-                   .arg(zoom_, 0, 'f', 1));
 }
 
 void RoiPickerDialog::mousePressEvent(QMouseEvent *event)
 {
+    if (!canvas_->geometry().contains(event->position().toPoint())) {
+        QDialog::mousePressEvent(event);
+        return;
+    }
     if (event->button() == Qt::LeftButton) {
         selecting_ = true;
         anchor_frame_ = widget_to_frame(event->position());
@@ -122,9 +149,12 @@ void RoiPickerDialog::mouseMoveEvent(QMouseEvent *event)
 
 void RoiPickerDialog::mouseDoubleClickEvent(QMouseEvent *event)
 {
-    Q_UNUSED(event);
+    if (event->button() != Qt::LeftButton || !canvas_->geometry().contains(event->position().toPoint()))
+        return;
+    selecting_ = panning_ = false;
     zoom_ = 1.0;
     center_ = QPointF(image_.width() / 2.0, image_.height() / 2.0);
+    update_details();
     update();
 }
 
@@ -142,8 +172,9 @@ void RoiPickerDialog::mouseReleaseEvent(QMouseEvent *event)
         y0 = std::clamp(y0, 0, std::max(0, image_.height() - 1));
         x1 = std::clamp(x1, 1, image_.width());
         y1 = std::clamp(y1, 1, image_.height());
-        if (x1 - x0 >= 8 && y1 - y0 >= 8)
+        if (x1 - x0 >= 16 && y1 - y0 >= 8)
             roi_ = QRect(x0, y0, x1 - x0, y1 - y0);
+        update_details();
         update();
     } else if (event->button() == Qt::RightButton) {
         panning_ = false;
@@ -152,11 +183,14 @@ void RoiPickerDialog::mouseReleaseEvent(QMouseEvent *event)
 
 void RoiPickerDialog::wheelEvent(QWheelEvent *event)
 {
+    if (!canvas_->geometry().contains(event->position().toPoint()) || event->angleDelta().y() == 0)
+        return;
     QPointF cursor = event->position();
     QPointF before = widget_to_frame(cursor);
     double factor = event->angleDelta().y() > 0 ? 1.25 : 1.0 / 1.25;
     zoom_ = std::clamp(zoom_ * factor, 1.0, 16.0);
     QPointF after = widget_to_frame(cursor);
     center_ += before - after;
+    update_details();
     update();
 }

@@ -16,8 +16,8 @@
         },
         {
             "name": "macos",
-            "displayName": "macOS Universal",
-            "description": "Build for macOS 12.0+ (Universal binary)",
+            "displayName": "macOS — Apple Silicon i Intel",
+            "description": "Budowanie dla macOS 13 lub nowszego, dla obu architektur",
             "inherits": [
                 "template"
             ],
@@ -44,8 +44,8 @@
             "inherits": [
                 "macos"
             ],
-            "displayName": "macOS Universal CI build",
-            "description": "Build for macOS 12.0+ (Universal binary) for CI",
+            "displayName": "macOS — Apple Silicon i Intel (testy automatyczne)",
+            "description": "Budowanie dla macOS 13 lub nowszego, dla obu architektur (testy automatyczne)",
             "generator": "Xcode",
             "cacheVariables": {
                 "CMAKE_COMPILE_WARNING_AS_ERROR": true,
@@ -54,8 +54,8 @@
         },
         {
             "name": "windows-x64",
-            "displayName": "Windows x64",
-            "description": "Build for Windows x64",
+            "displayName": "Windows 64-bit",
+            "description": "Budowanie wtyczki dla Windows 64-bit",
             "inherits": [
                 "template"
             ],
@@ -77,16 +77,16 @@
             "inherits": [
                 "windows-x64"
             ],
-            "displayName": "Windows x64 CI build",
-            "description": "Build for Windows x64 on CI",
+            "displayName": "Windows 64-bit (testy automatyczne)",
+            "description": "Budowanie wtyczki dla Windows 64-bit (testy automatyczne)",
             "cacheVariables": {
                 "CMAKE_COMPILE_WARNING_AS_ERROR": true
             }
         },
         {
             "name": "ubuntu-x86_64",
-            "displayName": "Ubuntu x86_64",
-            "description": "Build for Ubuntu x86_64",
+            "displayName": "Ubuntu 64-bit",
+            "description": "Budowanie wtyczki dla Ubuntu 64-bit",
             "inherits": [
                 "template"
             ],
@@ -111,8 +111,8 @@
             "inherits": [
                 "ubuntu-x86_64"
             ],
-            "displayName": "Ubuntu x86_64 CI build",
-            "description": "Build for Ubuntu x86_64 on CI",
+            "displayName": "Ubuntu 64-bit (testy automatyczne)",
+            "description": "Budowanie wtyczki dla Ubuntu 64-bit (testy automatyczne)",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "CMAKE_COMPILE_WARNING_AS_ERROR": true,
@@ -124,43 +124,43 @@
         {
             "name": "macos",
             "configurePreset": "macos",
-            "displayName": "macOS Universal",
-            "description": "macOS build for Universal architectures",
+            "displayName": "macOS — Apple Silicon i Intel",
+            "description": "Budowanie dla macOS 13 lub nowszego, dla obu architektur",
             "configuration": "RelWithDebInfo"
         },
         {
             "name": "macos-ci",
             "configurePreset": "macos-ci",
-            "displayName": "macOS Universal CI",
-            "description": "macOS CI build for Universal architectures",
+            "displayName": "macOS — Apple Silicon i Intel (testy automatyczne)",
+            "description": "Budowanie dla macOS 13 lub nowszego, dla obu architektur (testy automatyczne)",
             "configuration": "RelWithDebInfo"
         },
         {
             "name": "windows-x64",
             "configurePreset": "windows-x64",
-            "displayName": "Windows x64",
-            "description": "Windows build for x64",
+            "displayName": "Windows 64-bit",
+            "description": "Budowanie wtyczki dla Windows 64-bit",
             "configuration": "RelWithDebInfo"
         },
         {
             "name": "windows-ci-x64",
             "configurePreset": "windows-ci-x64",
-            "displayName": "Windows x64 CI",
-            "description": "Windows CI build for x64 (RelWithDebInfo configuration)",
+            "displayName": "Windows 64-bit (testy automatyczne)",
+            "description": "Budowanie wtyczki dla Windows 64-bit (testy automatyczne)",
             "configuration": "RelWithDebInfo"
         },
         {
             "name": "ubuntu-x86_64",
             "configurePreset": "ubuntu-x86_64",
-            "displayName": "Ubuntu x86_64",
-            "description": "Ubuntu build for x86_64",
+            "displayName": "Ubuntu 64-bit",
+            "description": "Budowanie wtyczki dla Ubuntu 64-bit",
             "configuration": "RelWithDebInfo"
         },
         {
             "name": "ubuntu-ci-x86_64",
             "configurePreset": "ubuntu-ci-x86_64",
-            "displayName": "Ubuntu x86_64 CI",
-            "description": "Ubuntu CI build for x86_64",
+            "displayName": "Ubuntu 64-bit (testy automatyczne)",
+            "description": "Budowanie wtyczki dla Ubuntu 64-bit (testy automatyczne)",
             "configuration": "RelWithDebInfo"
         }
     ]

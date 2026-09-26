@@ -100,7 +100,10 @@ private:
     int down_votes_ = 0;
     bool has_pending_ = false;
     double pending_ = 0.0;
+    double pending_start_value_ = 0.0;
     double pending_start_ = 0.0;
+    double pending_t_ = 0.0;
+    int pending_dir_ = 0;
     bool has_last_change_ = false;
     double last_change_t_ = 0.0;
 };

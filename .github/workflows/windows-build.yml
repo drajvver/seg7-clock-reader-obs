@@ -1,4 +1,4 @@
-name: Windows Build and Release
+name: Budowanie i wydanie dla Windows
 on:
   workflow_dispatch:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 jobs:
   windows-build:
-    name: Build for Windows
+    name: Budowanie dla Windows
     runs-on: windows-2022
     defaults:
       run:
@@ -21,27 +21,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Build Plugin
+      - name: Zbuduj wtyczkę
         uses: ./.github/actions/build-plugin
         with:
           target: x64
           config: RelWithDebInfo
 
-      - name: Package Plugin
+      - name: Przygotuj paczkę
         uses: ./.github/actions/package-plugin
         with:
           target: x64
           config: RelWithDebInfo
           package: true
 
-      - name: Upload Artifacts
+      - name: Udostępnij paczkę
         uses: actions/upload-artifact@v4
         with:
           name: seg7-clock-reader-windows-x64
           path: release/*.zip
           if-no-files-found: error
 
-      - name: Create GitHub Release
+      - name: Opublikuj wydanie
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
@@ -50,19 +50,29 @@ jobs:
           $tag = $env:GITHUB_REF_NAME
           $zip = (Get-ChildItem release/*.zip | Select-Object -First 1).FullName
           $notes = @"
-          7-Segment Clock Reader for OBS Studio (Windows x64).
+          Czytnik zegara 7-segmentowego do OBS Studio (Windows x64).
 
-          Install: extract the zip so that the ``seg7-clock-reader`` folder ends up in
-          ``%APPDATA%\obs-studio\plugins\`` (create the ``plugins`` folder if it does not
-          exist), then restart OBS.
+          Instalacja: zamknij OBS i rozpakuj pobrany plik. Skopiuj cały folder
+          ``seg7-clock-reader`` do ``%APPDATA%\obs-studio\plugins\``.
+          Jeśli folder ``plugins`` nie istnieje, utwórz go. Następnie uruchom OBS.
 
-          Usage: add a Text (FreeType 2) source, add the filter "7-Segment Clock Reader"
-          to your video source, pick the Text source in the filter and click
-          "Select ROI from video...".
+          Pierwsze uruchomienie: dodaj źródło Tekst (GDI+) lub Tekst (FreeType 2).
+          Do źródła z filmem lub kamerą dodaj filtr „Czytnik zegara 7-segmentowego”.
+          Wybierz źródło tekstu i kliknij „Zaznacz zegar na obrazie…”.
+          Zaznacz całe minuty i sekundy z dwukropkiem, np. 1:23.
 
-          Requires OBS Studio 32.x (x64).
+          Wymagany OBS Studio 32.x (64-bitowy).
+          Instrukcja: https://github.com/drajvver/seg7-clock-reader-obs#readme
           "@
-          gh release create $tag $zip --title "7-Segment Clock Reader $tag" --notes $notes --verify-tag
+          $version = $tag -replace '^v', ''
+          $versionNotes = Join-Path '.github/release-notes' "$version.md"
+          if (Test-Path $versionNotes) {
+            $notesFile = (Resolve-Path $versionNotes).Path
+          } else {
+            $notesFile = Join-Path $env:RUNNER_TEMP 'seg7-release-notes.md'
+            Set-Content -Path $notesFile -Value $notes -Encoding utf8
+          }
+          gh release create $tag $zip --title "Czytnik zegara 7-segmentowego $tag" --notes-file $notesFile --verify-tag
           if ($LASTEXITCODE -ne 0) {
             gh release upload $tag $zip --clobber
           }

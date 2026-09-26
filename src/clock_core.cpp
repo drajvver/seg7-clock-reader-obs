@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 namespace seg7 {
 namespace {
@@ -15,6 +16,8 @@ constexpr double NARROW_MIN_MARGIN = 0.08;
 constexpr double REFINE_MARGIN = 0.25;
 constexpr double OFFSET_PENALTY = 0.02;
 constexpr int SAMPLES_PER_AXIS = 40;
+constexpr int MAX_CLOCK_DIGITS = 5;
+constexpr size_t MAX_COMPONENTS = 4096;
 
 const double AXES[7][4] = {
     {0.18, 0.09, 0.82, 0.09},
@@ -71,6 +74,9 @@ std::vector<Comp> label_components(const uint8_t *mask, int w, int h, bool eight
                 }
             }
             comps.push_back(c);
+            // Do not run quadratic glyph merging on a noisy full-video ROI.
+            if (comps.size() > MAX_COMPONENTS)
+                return {};
         }
     }
     return comps;
@@ -95,7 +101,15 @@ double percentile_hist(const uint64_t *hist, uint64_t n, double q) {
     return vlo + (vhi - vlo) * (rank - (double)lo);
 }
 
+bool valid_image(const uint8_t *gray, int width, int height, int stride) {
+    // Component indices and areas use int; validate before touching image memory.
+    return gray && width > 0 && height > 0 && stride >= width &&
+           (uint64_t)width * height <= (uint64_t)std::numeric_limits<int>::max();
+}
+
 bool preprocess(const uint8_t *gray, int width, int height, int stride, std::vector<uint8_t> &mask) {
+    if (!valid_image(gray, width, height, stride))
+        return false;
     uint64_t hist[256] = {0};
     for (int y = 0; y < height; ++y) {
         const uint8_t *row = gray + (size_t)y * stride;
@@ -226,16 +240,50 @@ bool slant_of(const std::vector<uint8_t> &mask, int w, int h, const Rect &cell, 
     }
     if (all_pts.size() < 8)
         return false;
-    double slope = fit_slope(all_pts);
-    if (slope < -0.6 || slope > -0.03)
+    if (band_pts.empty())
         return false;
+    double slope = 0.0;
     for (auto &pts : band_pts) {
         double band_slope = fit_slope(pts);
         if (band_slope < -0.6 || band_slope > -0.03)
             return false;
+        slope += band_slope;
     }
-    out_slant = slope;
+    // Top and bottom bands can contain opposite sides of a 2, 5 or 6.
+    // Their offsets differ, but their individual slopes still describe slant.
+    out_slant = slope / band_pts.size();
     return true;
+}
+
+bool fit_cell(const std::vector<uint8_t> &mask, int w, Glyph &gl) {
+    int x0 = gl.x0, x1 = gl.x1;
+    if (gl.has_slant) {
+        double left = gl.x1, right = gl.x0;
+        double center_y = gl.y0 + 0.5 * gl.h();
+        for (int y = gl.y0; y < gl.y1; ++y) {
+            for (int x = gl.x0; x < gl.x1; ++x) {
+                if (!mask[(size_t)y * w + x])
+                    continue;
+                double aligned_x = x - gl.slant * (y - center_y);
+                left = std::min(left, aligned_x);
+                right = std::max(right, aligned_x);
+            }
+        }
+        x0 = (int)std::lround(left);
+        x1 = (int)std::lround(right) + 1;
+    }
+    int wg = std::max((int)std::lround(0.75 * gl.h()), 8);
+    bool narrow = x1 - x0 < 0.6 * wg;
+    if (narrow) {
+        int inset = std::max(1, (int)std::lround(0.08 * wg));
+        gl.cell = {x1 - inset - wg, gl.y0, wg, gl.h()};
+    } else {
+        // Use the measured width after removing slant. A 4 has no lit top or
+        // bottom segment, so estimating width from its height clips its left
+        // segment. A slanted 1 needs its right edge at the glyph's midline.
+        gl.cell = {x0, gl.y0, x1 - x0, gl.h()};
+    }
+    return narrow;
 }
 
 void axis_points(const Rect &cell, bool has_slant, double slant,
@@ -305,7 +353,7 @@ int score_digit_best(const std::vector<uint8_t> &dilated, int w, int h, const Re
     out_cell = cell;
     if (digit >= 0 && margin >= REFINE_MARGIN)
         return digit;
-    int search = std::max(2, (int)std::lround(0.14 * cell.h));
+    int search = std::clamp((int)std::lround(0.14 * cell.h), 2, 32);
     double best_key = margin;
     int best_digit = digit;
     double best_scores[7];
@@ -436,7 +484,7 @@ bool split_once(const std::vector<uint8_t> &mask, int w, const Rect &g, double W
                 std::vector<Rect> &out) {
     int width = g.w;
     int k = (int)std::lround((double)width / W);
-    if (k < 2 || std::abs(width - k * W) > 0.4 * W)
+    if (k < 2 || k > MAX_CLOCK_DIGITS || std::abs(width - k * W) > 0.4 * W)
         return false;
     int lo = g.x + (int)(0.30 * width);
     int hi = g.x + (int)(0.70 * width);
@@ -469,11 +517,12 @@ bool split_once(const std::vector<uint8_t> &mask, int w, const Rect &g, double W
             return true;
         }
     }
-    int edges[16];
-    for (int i = 0; i <= k; ++i)
-        edges[i] = g.x + (int)std::lround((double)i * width / k);
-    for (int i = 0; i < k; ++i)
-        out.push_back({edges[i], g.y, edges[i + 1] - edges[i], g.h});
+    int left = g.x;
+    for (int i = 1; i <= k; ++i) {
+        int right = g.x + (int)std::lround((double)i * width / k);
+        out.push_back({left, g.y, right - left, g.h});
+        left = right;
+    }
     return true;
 }
 
@@ -511,23 +560,21 @@ double median(std::vector<double> v) {
 
 bool parse_time(const std::vector<int> &digits, const std::vector<char> &dot_after, bool last_small,
                 double &value, std::string &display) {
-    if (digits.empty())
+    if (digits.size() < 3 || digits.size() > MAX_CLOCK_DIGITS || dot_after.size() != digits.size())
         return false;
-    int separator = -1;
-    for (size_t i = 0; i < dot_after.size(); ++i) {
-        if (dot_after[i]) {
-            if (separator >= 0)
-                return false;
-            separator = (int)i;
-        }
-    }
-    if (last_small && digits.size() >= 4 && digits.size() <= 5) {
-        if (separator != (int)digits.size() - 4)
+    const int count = (int)digits.size();
+    // Tenths may have their own decimal point, as well as the minutes separator.
+    // Equal-size tenths need an explicit decimal point to disambiguate MM:SS.
+    if (last_small || (count >= 4 && dot_after[count - 2])) {
+        if (count < 4 || !dot_after[count - 4])
             return false;
+        for (int i = 0; i < count; ++i)
+            if (dot_after[i] && i != count - 4 && i != count - 2)
+                return false;
         int tenths = digits.back();
-        int secs = digits[digits.size() - 3] * 10 + digits[digits.size() - 2];
+        int secs = digits[count - 3] * 10 + digits[count - 2];
         int mins = 0;
-        for (size_t i = 0; i + 3 < digits.size(); ++i)
+        for (int i = 0; i < count - 3; ++i)
             mins = mins * 10 + digits[i];
         if (secs >= 60)
             return false;
@@ -537,8 +584,14 @@ bool parse_time(const std::vector<int> &digits, const std::vector<char> &dot_aft
         value = mins * 60 + secs + tenths / 10.0;
         return true;
     }
-    if (last_small)
-        return false;
+    int separator = -1;
+    for (size_t i = 0; i < dot_after.size(); ++i) {
+        if (dot_after[i]) {
+            if (separator >= 0)
+                return false;
+            separator = (int)i;
+        }
+    }
     if (digits.size() == 4) {
         if (separator >= 0 && separator != 1)
             return false;
@@ -600,14 +653,18 @@ Rect tighten_roi(const uint8_t *gray, int width, int height, int stride) {
 
 Reading decode(const uint8_t *gray, int width, int height, int stride) {
     Reading r;
+    if (!valid_image(gray, width, height, stride)) {
+        r.reason = "nieprawidłowe dane obrazu; sprawdź źródło wideo";
+        return r;
+    }
     std::vector<uint8_t> mask;
     if (!preprocess(gray, width, height, stride, mask)) {
-        r.reason = "no display contrast";
+        r.reason = "cyfry są za mało widoczne; zaznacz wyraźny zegar na ciemnym tle";
         return r;
     }
     std::vector<Comp> comps = filter_components(mask, width, height);
     if (comps.empty()) {
-        r.reason = "no glyphs";
+        r.reason = "nie znaleziono cyfr; zaznacz sam zegar bez otoczenia";
         return r;
     }
     std::vector<Rect> rects;
@@ -650,18 +707,22 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
             o.kind = GlyphKind::Reject;
     }
 
+    size_t digit_count = (size_t)std::count_if(objects.begin(), objects.end(),
+        [](const Glyph &gl) { return gl.kind == GlyphKind::Digit; });
+    if (digit_count < 3 || digit_count > MAX_CLOCK_DIGITS) {
+        r.glyphs = std::move(objects);
+        r.digits.assign(digit_count, -1);
+        r.reason = digit_count == 0 ? "nie znaleziono cyfr" : digit_count < 3
+                   ? "brakuje części zegara; zaznacz minuty i sekundy"
+                   : "za dużo cyfr lub zakłóceń; zaznacz sam zegar";
+        return r;
+    }
+
     std::vector<double> slants;
     for (auto &gl : objects) {
         if (gl.kind != GlyphKind::Digit)
             continue;
-        int wg = std::max((int)std::lround(0.75 * gl.h()), 8);
-        if (gl.w() < 0.6 * wg) {
-            int inset = std::max(1, (int)std::lround(0.08 * wg));
-            gl.cell = {gl.x1 - inset - wg, gl.y0, wg, gl.h()};
-        } else {
-            int wc = std::min(gl.w(), wg);
-            gl.cell = {gl.x0 + (gl.w() - wc) / 2, gl.y0, wc, gl.h()};
-        }
+        gl.cell = {gl.x0, gl.y0, gl.w(), gl.h()};
         double s = 0.0;
         if (slant_of(mask, width, height, gl.cell, s)) {
             gl.slant = s;
@@ -698,15 +759,15 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
             gl.slant = global_slant;
             gl.has_slant = true;
         }
+        bool narrow = fit_cell(mask, width, gl);
         double scores[7], margin;
         Rect cell;
         int digit = score_digit_best(dilated, width, height, gl.cell, gl.has_slant, gl.slant,
                                      scores, margin, cell);
         gl.cell = cell;
         std::memcpy(gl.scores, scores, sizeof(scores));
-        int wg = std::max((int)std::lround(0.75 * gl.h()), 8);
         bool narrow_ok = false;
-        if (digit < 0 && gl.w() < 0.6 * wg) {
+        if (digit < 0 && narrow) {
             double ordered[7];
             std::memcpy(ordered, scores, sizeof(ordered));
             std::sort(ordered, ordered + 7, std::greater<double>());
@@ -725,9 +786,9 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
         gl.digit = digit;
         gl.margin = digit >= 0 ? margin : 0.0;
         if (digit < 0)
-            reason = "unknown segment pattern";
+            reason = "cyfry są nieczytelne; popraw zaznaczenie zegara";
         else if (margin < (narrow_ok ? NARROW_MIN_MARGIN : MIN_MARGIN))
-            reason = "low segment margin";
+            reason = "odczyt jest niepewny; popraw zaznaczenie lub jakość obrazu";
         digits.push_back(digit);
         dot_after.push_back(0);
         confidences.push_back(std::max(margin, 0.0));
@@ -743,7 +804,7 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
             r.raw += ".";
     }
     if (digits.empty()) {
-        r.reason = "no digits";
+        r.reason = "nie znaleziono cyfr";
         return r;
     }
     double conf = 0.0;
@@ -766,7 +827,8 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
     double value;
     std::string display;
     if (!parse_time(digits, dot_after, last_small, value, display)) {
-        r.reason = digits.size() < 3 ? "incomplete clock; enlarge ROI" : "implausible time";
+        r.reason = digits.size() < 3 ? "brakuje części zegara; zaznacz minuty i sekundy"
+                                     : "nie rozpoznano czasu; zaznacz pełne minuty i sekundy, np. 1:23";
         return r;
     }
     r.value_seconds = value;
@@ -835,8 +897,10 @@ void ClockTracker::vote_direction(double delta) {
 
 bool ClockTracker::accept(double value, const Reading &reading, double t) {
     bool changed = !has_value_ || value != value_;
-    if (changed)
+    if (changed) {
         last_change_t_ = t;
+        has_last_change_ = true;
+    }
     has_value_ = true;
     value_ = value;
     display_ = reading.display;
@@ -879,9 +943,11 @@ TrackState ClockTracker::state(double t, bool changed) const {
 }
 
 TrackState ClockTracker::update(const Reading &reading, double t) {
-    if (!reading.valid || !reading.has_value) {
+    if (!reading.valid || !reading.has_value || !std::isfinite(reading.value_seconds) ||
+        reading.value_seconds < 0.0 || !std::isfinite(t)) {
         invalid_frames++;
-        return state(t, false);
+        has_pending_ = false;
+        return state(std::isfinite(t) ? t : t_, false);
     }
     double value = std::round(reading.value_seconds * 1000.0) / 1000.0;
     if (!has_value_) {
@@ -893,16 +959,28 @@ TrackState ClockTracker::update(const Reading &reading, double t) {
     if (plausible(delta, dt)) {
         vote_direction(delta);
         bool changed = accept(value, reading, t);
-        if (!has_last_change_)
-            last_change_t_ = t;
         return state(t, changed);
     }
     rejected++;
-    if (!has_pending_ || std::abs(value - pending_) > 0.05) {
-        pending_ = value;
+    double pending_delta = value - pending_;
+    double pending_dt = t - pending_t_;
+    int expected_dir = direction_ == Direction::Up ? 1
+                       : direction_ == Direction::Down ? -1 : pending_dir_;
+    bool consistent = has_pending_ && pending_dt >= 0.0 && pending_dt <= stale_after &&
+                      std::abs(pending_delta) <= pending_dt + tolerance &&
+                      std::abs(value - pending_start_value_) <= t - pending_start_ + tolerance &&
+                      (expected_dir <= 0 || pending_delta >= -0.05) &&
+                      (expected_dir >= 0 || pending_delta <= 0.05);
+    if (!consistent) {
+        pending_start_value_ = value;
         pending_start_ = t;
+        pending_dir_ = 0;
         has_pending_ = true;
+    } else if (std::abs(pending_delta) > 0.05) {
+        pending_dir_ = pending_delta > 0.0 ? 1 : -1;
     }
+    pending_ = value;
+    pending_t_ = t;
     if (has_pending_ && (t - pending_start_) >= resync_seconds_for(pending_, t)) {
         resyncs++;
         dir_ = direction_ == Direction::Up ? 1 : direction_ == Direction::Down ? -1 : 0;

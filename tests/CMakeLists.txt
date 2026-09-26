@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.16)
+project(seg7_clock_tests LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(ENABLE_SANITIZERS "Sprawdzaj błędy pamięci i niezdefiniowane zachowanie (ASan/UBSan)" OFF)
+option(TEST_OBS_INTEGRATION "Testuj integrację (wymaga bibliotek programistycznych OBS i Qt)" OFF)
+
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
+
+if(ENABLE_SANITIZERS AND NOT MSVC)
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined)
+endif()
+
+enable_testing()
+add_executable(clock_core_tests clock_core_tests.cpp ../src/clock_core.cpp)
+target_include_directories(clock_core_tests PRIVATE ../src)
+add_test(NAME clock_core COMMAND clock_core_tests)
+
+if(TEST_OBS_INTEGRATION)
+  find_package(libobs REQUIRED)
+  find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+  add_executable(plugin_tests plugin_tests.cpp ../src/clock_core.cpp ../src/roi-picker.cpp)
+  target_link_libraries(plugin_tests PRIVATE OBS::libobs Qt6::Widgets Qt6::Core)
+  if(APPLE)
+    target_compile_options(plugin_tests PRIVATE -include "${CMAKE_CURRENT_SOURCE_DIR}/../mac/arch-shim.h")
+  endif()
+  add_test(NAME obs_callbacks COMMAND plugin_tests)
+endif()

@@ -4,8 +4,8 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 
 project(${_name} VERSION ${_version})
 
-option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
-option(ENABLE_QT "Use Qt functionality" OFF)
+option(ENABLE_FRONTEND_API "Użyj obs-frontend-api do obsługi interfejsu" OFF)
+option(ENABLE_QT "Włącz interfejs Qt do zaznaczania zegara" ON)
 
 include(compilerconfig)
 include(defaults)
@@ -16,13 +16,17 @@ add_library(${CMAKE_PROJECT_NAME} MODULE)
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
+if(APPLE)
+  target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -include "${CMAKE_CURRENT_SOURCE_DIR}/mac/arch-shim.h")
+endif()
+
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::obs-frontend-api)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core)
+  find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
   target_compile_options(
     ${CMAKE_PROJECT_NAME}
@@ -32,6 +36,8 @@ if(ENABLE_QT)
     ${CMAKE_PROJECT_NAME}
     PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
   )
+else()
+  message(FATAL_ERROR "Zaznaczanie zegara wymaga Qt. Ustaw ENABLE_QT=ON.")
 endif()
 
 target_sources(
