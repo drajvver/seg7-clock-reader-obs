@@ -4,14 +4,14 @@ Wtyczka do OBS Studio, która w czasie rzeczywistym odczytuje zegar 7-segmentowy
 (np. zegar meczowy z transmisji sportowej) z wybranego obszaru źródła wideo
 i wyświetla wynik jako **zwykły tekst** — w dowolnym źródle tekstowym OBS.
 
-Zamiast OCR używa deterministycznego dekodowania segmentów (bez modeli AI),
-dlatego nie daje fałszywych odczytów. Zegar zatrzymany w trakcie meczu jest
+Zamiast OCR używa deterministycznego dekodowania segmentów (bez modeli AI).
+Walidacja układu cyfr i filtr czasowy ograniczają błędne odczyty. Zegar zatrzymany w trakcie meczu jest
 poprawnie rozpoznawany — wtyczka trzyma ostatnią wartość i wznawia odczyt,
 gdy zegar ruszy ponownie.
 
 ## Funkcje
 
-- **Filtr wideo** nakładany na dowolne źródło (kamera, Media Source, stream) —
+- **Filtr wideo** nakładany na asynchroniczne źródło wideo (np. kamera, Media Source) —
   nie modyfikuje obrazu, tylko z niego czyta.
 - **Wybór obszaru (ROI)** z podglądu na żywo: przeciągnij ramkę, scroll = zoom,
   prawy przycisk = przesuwanie, auto-dopasowanie do ciemnego panelu zegara.
@@ -20,7 +20,7 @@ gdy zegar ruszy ponownie.
   i używać w dowolnym miejscu nakładki.
 - **Odporność na błędy**: walidacja segmentów + filtr czasowy — złe odczyty
   są odrzucane, zatrzymany zegar „trzyma” wartość, brak obrazu = ostatnia
-  wartość (status LOST).
+  wartość. Status w ustawieniach filtra pokazuje też brak nowych klatek.
 - **Opcje**: tylko sekundy (bez dziesiątek), kierunek odliczania
   (auto / w górę / w dół), auto-dopasowanie ROI.
 - Obszar ROI skaluje się automatycznie przy zmianie rozdzielczości źródła.
@@ -28,7 +28,7 @@ gdy zegar ruszy ponownie.
 ## Wymagania
 
 - OBS Studio **32.x** (x64) — zbudowane i testowane z OBS 32.2.2
-- Windows 10/11 x64 (testowane)/ macOS 12+ Apple Silicon (patrz sekcja macOS)
+- Windows 10/11 x64 (testowane)/ macOS 13+ Apple Silicon (patrz sekcja macOS)
 
 ## Instalacja (Windows)
 
@@ -50,10 +50,11 @@ Alternatywnie (instalacja globalna, wymaga praw administratora): rozpakuj do
 3. Kliknij prawym na źródło wideo → **Filtry** → **+** → **7-Segment Clock Reader**.
 4. W ustawieniach filtra:
    - **Źródło tekstu** — wybierz dodane wcześniej źródło tekstu,
-   - **Wybierz ROI z wideo…** — przeciągnij ramkę wokół zegara
+  - **Wybierz ROI z wideo…** — przeciągnij ramkę wokół zegara
      (scroll = zoom, prawy przycisk = przesuwanie, dwuklik = reset);
      opcja *Auto-dopasuj ROI do panelu wyświetlacza* dociągnie zaznaczenie
-     do ciemnego panelu zegara,
+     do ciemnego panelu zegara. Zaznacz pełne minuty i sekundy z separatorem;
+     wąski ROI obejmujący tylko `5.2` jest odrzucany jako niepełny zegar,
    - **Pokaż tylko sekundy** (zalecane), **Kierunek zegara** (Auto).
 5. Gotowe — źródło tekstu aktualizuje się na żywo (1×/s lub 10×/s przy
    dziesiątych częściach sekundy), a podczas zatrzymania zegara trzyma

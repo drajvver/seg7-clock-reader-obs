@@ -26,8 +26,6 @@ const double AXES[7][4] = {
     {0.18, 0.50, 0.82, 0.50},
 };
 
-const char SEG_NAMES[7] = {'a', 'b', 'c', 'd', 'e', 'f', 'g'};
-
 struct Comp {
     int x0, y0, x1, y1, area;
 };
@@ -511,11 +509,21 @@ double median(std::vector<double> v) {
     return 0.5 * (v[n / 2 - 1] + v[n / 2]);
 }
 
-bool parse_time(const std::vector<int> &digits, bool last_small,
+bool parse_time(const std::vector<int> &digits, const std::vector<char> &dot_after, bool last_small,
                 double &value, std::string &display) {
     if (digits.empty())
         return false;
-    if (last_small && digits.size() >= 3) {
+    int separator = -1;
+    for (size_t i = 0; i < dot_after.size(); ++i) {
+        if (dot_after[i]) {
+            if (separator >= 0)
+                return false;
+            separator = (int)i;
+        }
+    }
+    if (last_small && digits.size() >= 4 && digits.size() <= 5) {
+        if (separator != (int)digits.size() - 4)
+            return false;
         int tenths = digits.back();
         int secs = digits[digits.size() - 3] * 10 + digits[digits.size() - 2];
         int mins = 0;
@@ -529,7 +537,11 @@ bool parse_time(const std::vector<int> &digits, bool last_small,
         value = mins * 60 + secs + tenths / 10.0;
         return true;
     }
+    if (last_small)
+        return false;
     if (digits.size() == 4) {
+        if (separator >= 0 && separator != 1)
+            return false;
         int mm = digits[0] * 10 + digits[1];
         int ss = digits[2] * 10 + digits[3];
         if (ss >= 60)
@@ -541,6 +553,8 @@ bool parse_time(const std::vector<int> &digits, bool last_small,
         return true;
     }
     if (digits.size() == 3) {
+        if (separator >= 0 && separator != 0)
+            return false;
         int secs = digits[1] * 10 + digits[2];
         if (secs >= 60)
             return false;
@@ -548,13 +562,6 @@ bool parse_time(const std::vector<int> &digits, bool last_small,
         std::snprintf(buf, sizeof(buf), "%d:%02d", digits[0], secs);
         display = buf;
         value = digits[0] * 60 + secs;
-        return true;
-    }
-    if (digits.size() == 2) {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%d.%d", digits[0], digits[1]);
-        display = buf;
-        value = digits[0] + digits[1] / 10.0;
         return true;
     }
     return false;
@@ -758,8 +765,8 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
     }
     double value;
     std::string display;
-    if (!parse_time(digits, last_small, value, display)) {
-        r.reason = "implausible time";
+    if (!parse_time(digits, dot_after, last_small, value, display)) {
+        r.reason = digits.size() < 3 ? "incomplete clock; enlarge ROI" : "implausible time";
         return r;
     }
     r.value_seconds = value;

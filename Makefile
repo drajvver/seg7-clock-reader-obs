@@ -14,7 +14,7 @@ BIN := $(BUNDLE)/Contents/MacOS/$(PLUGIN)
 SRCS := src/plugin-main.cpp src/roi-picker.cpp src/clock_core.cpp
 OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(notdir $(basename $(SRCS)))))
 
-CXXFLAGS := -std=c++17 -O2 -fPIC $(ARCHFLAGS) -mmacosx-version-min=12.0 \
+CXXFLAGS := -std=c++17 -O2 -fPIC $(ARCHFLAGS) -mmacosx-version-min=13.0 \
 	-include mac/arch-shim.h \
 	-I$(OBS_SRC)/libobs -I$(DEPS)/include -Isrc -I../cpp/src \
 	-F$(DEPS)/lib -F$(OBS_APP) \
@@ -23,7 +23,7 @@ CXXFLAGS := -std=c++17 -O2 -fPIC $(ARCHFLAGS) -mmacosx-version-min=12.0 \
 	-I$(DEPS)/lib/QtCore.framework/Headers \
 	-Wall -Wno-unused-parameter -Wno-deprecated-declarations
 
-LDFLAGS := -bundle $(ARCHFLAGS) -mmacosx-version-min=12.0 \
+LDFLAGS := -bundle $(ARCHFLAGS) -mmacosx-version-min=13.0 \
 	-F$(OBS_APP) -framework libobs -framework QtWidgets -framework QtGui -framework QtCore \
 	-Wl,-rpath,@executable_path/../Frameworks \
 	-Wl,-rpath,@loader_path/../../Frameworks

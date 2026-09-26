@@ -5,6 +5,8 @@
 #include <QMessageBox>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -43,7 +45,10 @@ struct ClockFilter {
     int frame_w = 0, frame_h = 0;
     int frame_counter = 1000;
     std::string last_text;
+    std::string last_display;
     std::string status = "No reading yet.";
+    double last_timestamp = -1.0;
+    std::chrono::steady_clock::time_point last_frame_wall;
 
     ClockFilter() : tracker(seg7::ClockTracker::Direction::Auto) {}
 };
@@ -78,49 +83,133 @@ bool enum_text_sources(void *param, obs_source_t *source)
     return true;
 }
 
-void set_text_source(const std::string &name, const std::string &text)
+bool set_text_source(const std::string &name, const std::string &text)
 {
     if (name.empty())
-        return;
+        return false;
     obs_source_t *source = obs_get_source_by_name(name.c_str());
     if (!source)
-        return;
+        return false;
+    bool updated = false;
     if (is_text_source_id(obs_source_get_id(source))) {
         obs_data_t *settings = obs_data_create();
         obs_data_set_string(settings, "text", text.c_str());
         obs_source_update(source, settings);
         obs_data_release(settings);
+        updated = true;
     }
     obs_source_release(source);
+    return updated;
+}
+
+bool text_source_available(const std::string &name)
+{
+    if (name.empty())
+        return false;
+    obs_source_t *source = obs_get_source_by_name(name.c_str());
+    if (!source)
+        return false;
+    bool available = is_text_source_id(obs_source_get_id(source));
+    obs_source_release(source);
+    return available;
+}
+
+// Convert only the requested rows. Planar 8-bit formats can use their Y plane directly.
+bool gray_row(const obs_source_frame *frame, int y, int x, int count, uint8_t *out)
+{
+    const size_t stride = frame->linesize[0];
+    const uint8_t *row = frame->data[0] + (size_t)y * stride;
+    switch (frame->format) {
+    case VIDEO_FORMAT_I420:
+    case VIDEO_FORMAT_NV12:
+    case VIDEO_FORMAT_I444:
+    case VIDEO_FORMAT_I422:
+    case VIDEO_FORMAT_I40A:
+    case VIDEO_FORMAT_I42A:
+    case VIDEO_FORMAT_YUVA:
+    case VIDEO_FORMAT_Y800:
+        if (stride < frame->width)
+            return false;
+        std::memcpy(out, row + x, count);
+        return true;
+    case VIDEO_FORMAT_YUY2:
+    case VIDEO_FORMAT_YVYU:
+    case VIDEO_FORMAT_UYVY:
+        if (stride < (size_t)frame->width * 2)
+            return false;
+        for (int i = 0; i < count; ++i)
+            out[i] = row[2 * (x + i) + (frame->format == VIDEO_FORMAT_UYVY ? 1 : 0)];
+        return true;
+    case VIDEO_FORMAT_BGRA:
+    case VIDEO_FORMAT_BGRX:
+    case VIDEO_FORMAT_RGBA:
+    case VIDEO_FORMAT_BGR3: {
+        const int channels = frame->format == VIDEO_FORMAT_BGR3 ? 3 : 4;
+        if (stride < (size_t)frame->width * channels)
+            return false;
+        for (int i = 0; i < count; ++i) {
+            const uint8_t *p = row + (size_t)(x + i) * channels;
+            int r = frame->format == VIDEO_FORMAT_RGBA ? p[0] : p[2];
+            int g = p[1];
+            int b = frame->format == VIDEO_FORMAT_RGBA ? p[2] : p[0];
+            out[i] = (uint8_t)((77 * r + 150 * g + 29 * b + 128) >> 8);
+        }
+        return true;
+    }
+    case VIDEO_FORMAT_AYUV:
+        if (stride < (size_t)frame->width * 4)
+            return false;
+        for (int i = 0; i < count; ++i)
+            out[i] = row[4 * (x + i) + 1];
+        return true;
+    case VIDEO_FORMAT_I010:
+    case VIDEO_FORMAT_P010:
+    case VIDEO_FORMAT_I210:
+    case VIDEO_FORMAT_I412:
+        if (stride < (size_t)frame->width * 2)
+            return false;
+        for (int i = 0; i < count; ++i) {
+            const uint8_t *p = row + 2 * (x + i);
+            uint16_t sample = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+            out[i] = frame->format == VIDEO_FORMAT_P010 ? (uint8_t)(sample >> 8)
+                     : frame->format == VIDEO_FORMAT_I412 ? (uint8_t)(sample >> 4)
+                     : (uint8_t)(sample >> 2);
+        }
+        return true;
+    default:
+        return false;
+    }
 }
 
 void process_frame(ClockFilter *f, const struct obs_source_frame *frame)
 {
     if (frame->width < 16 || frame->height < 8 || !frame->data[0])
         return;
-    switch (frame->format) {
-    case VIDEO_FORMAT_I420:
-    case VIDEO_FORMAT_NV12:
-    case VIDEO_FORMAT_I444:
-    case VIDEO_FORMAT_I422:
-    case VIDEO_FORMAT_Y800:
-        break;
-    default:
-        return;
-    }
-
-    const uint8_t *plane = frame->data[0];
-    const int stride = (int)frame->linesize[0];
     const int fw = (int)frame->width;
     const int fh = (int)frame->height;
-
+    if (fw > 16384 || fh > 16384 || frame->linesize[0] == 0)
+        return;
+    std::string target;
+    std::string text;
+    bool publish = false;
+    std::unique_lock<std::mutex> lock(f->mutex);
+    f->last_frame_wall = std::chrono::steady_clock::now();
     if ((f->frame_counter++ % 15) == 0) {
-        std::lock_guard<std::mutex> lock(f->mutex);
-        f->frame_gray.resize((size_t)fw * fh);
-        for (int y = 0; y < fh; ++y)
-            std::memcpy(f->frame_gray.data() + (size_t)y * fw, plane + (size_t)y * stride, fw);
-        f->frame_w = fw;
-        f->frame_h = fh;
+        std::vector<uint8_t> snapshot((size_t)fw * fh);
+        bool captured = true;
+        for (int y = 0; y < fh; ++y) {
+            if (!gray_row(frame, y, 0, fw, snapshot.data() + (size_t)y * fw)) {
+                captured = false;
+                break;
+            }
+        }
+        if (captured) {
+            f->frame_gray = std::move(snapshot);
+            f->frame_w = fw;
+            f->frame_h = fh;
+        } else {
+            f->frame_gray.clear();
+        }
     }
 
     int rx = f->roi_x, ry = f->roi_y, rw = f->roi_w, rh = f->roi_h;
@@ -140,24 +229,46 @@ void process_frame(ClockFilter *f, const struct obs_source_frame *frame)
     if (rw < 16 || rh < 8)
         return;
 
-    const uint8_t *crop = plane + (size_t)ry * stride + rx;
-    seg7::Reading reading = seg7::decode(crop, rw, rh, stride);
-    double t = (double)frame->timestamp / 1e9;
-    seg7::TrackState state = f->tracker.update(reading, t);
-
-    if (state.changed && state.has_value) {
-        std::string text = f->seconds_only ? seg7::format_seconds_only(state.display)
-                                           : state.display;
-        {
-            std::lock_guard<std::mutex> lock(f->mutex);
-            f->last_text = text;
-            char buf[160];
-            std::snprintf(buf, sizeof(buf), "Reading: %s  confidence %.2f%s",
-                          text.c_str(), state.confidence,
-                          state.stale ? "  (display lost)" : state.stopped ? "  (clock stopped)" : "");
-            f->status = buf;
+    std::vector<uint8_t> crop((size_t)rw * rh);
+    for (int y = 0; y < rh; ++y) {
+        if (!gray_row(frame, ry + y, rx, rw, crop.data() + (size_t)y * rw)) {
+            f->status = "Unsupported video format or invalid frame stride.";
+            return;
         }
-        set_text_source(f->target, text);
+    }
+    seg7::Reading reading = seg7::decode(crop.data(), rw, rh, rw);
+    double t = (double)frame->timestamp / 1e9;
+    if (f->last_timestamp >= 0.0 && t + 0.001 < f->last_timestamp)
+        f->tracker.reset();
+    f->last_timestamp = t;
+    seg7::TrackState state = f->tracker.update(reading, t);
+    if (state.has_value) {
+        f->last_display = state.display;
+        text = f->seconds_only ? seg7::format_seconds_only(state.display) : state.display;
+        target = f->target;
+        publish = text != f->last_text || state.changed;
+        f->last_text = text;
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "Reading: %s  confidence %.2f%s", text.c_str(),
+                      state.confidence, state.stale ? "  (display lost)"
+                      : state.stopped ? "  (clock stopped)" : "");
+        f->status = buf;
+    } else {
+        f->status = reading.valid ? "Waiting for stable clock reading."
+                                   : "No valid clock reading: " + reading.reason;
+    }
+    lock.unlock();
+    if (state.has_value && !text_source_available(target)) {
+        std::lock_guard<std::mutex> status_lock(f->mutex);
+        if (f->target == target) {
+            f->status = target.empty() ? "Select a text source."
+                                       : "Text source missing or unsupported: " + target;
+            f->last_text.clear();
+        }
+    } else if (publish && !set_text_source(target, text)) {
+        std::lock_guard<std::mutex> status_lock(f->mutex);
+        if (f->target == target)
+            f->last_text.clear();
     }
 }
 
@@ -202,27 +313,49 @@ void clock_filter_update(void *data, obs_data_t *settings)
     bool seconds_only = obs_data_get_bool(settings, S_SECONDS);
     bool tighten = obs_data_get_bool(settings, S_TIGHTEN);
     const char *target = obs_data_get_string(settings, S_TARGET);
+    std::string target_name = target ? target : "";
+    std::string existing_text;
+    bool target_changed = false;
+    bool format_changed = false;
+    {
+        std::lock_guard<std::mutex> lock(f->mutex);
 
-    bool roi_changed = roi_x != f->roi_x || roi_y != f->roi_y || roi_w != f->roi_w ||
-                       roi_h != f->roi_h || frame_w != f->roi_frame_w;
-    bool direction_changed = direction != f->direction;
-    bool target_changed = f->target != (target ? target : "");
+        bool roi_changed = roi_x != f->roi_x || roi_y != f->roi_y || roi_w != f->roi_w ||
+                           roi_h != f->roi_h || frame_w != f->roi_frame_w ||
+                           frame_h != f->roi_frame_h;
+        bool direction_changed = direction != f->direction;
+        target_changed = f->target != target_name;
+        format_changed = seconds_only != f->seconds_only;
 
-    f->roi_x = roi_x;
-    f->roi_y = roi_y;
-    f->roi_w = roi_w;
-    f->roi_h = roi_h;
-    f->roi_frame_w = frame_w;
-    f->roi_frame_h = frame_h;
-    f->direction = direction;
-    f->seconds_only = seconds_only;
-    f->tighten = tighten;
-    f->target = target ? target : "";
+        f->roi_x = roi_x;
+        f->roi_y = roi_y;
+        f->roi_w = roi_w;
+        f->roi_h = roi_h;
+        f->roi_frame_w = frame_w;
+        f->roi_frame_h = frame_h;
+        f->direction = direction;
+        f->seconds_only = seconds_only;
+        f->tighten = tighten;
+        f->target = target_name;
 
-    if (roi_changed || direction_changed)
-        f->tracker = seg7::ClockTracker(tracker_direction(direction));
-    if (target_changed && !f->last_text.empty())
-        set_text_source(f->target, f->last_text);
+        if (roi_changed || direction_changed) {
+            f->tracker = seg7::ClockTracker(tracker_direction(direction));
+            f->last_text.clear();
+            f->last_display.clear();
+            f->last_timestamp = -1.0;
+        }
+        if (format_changed && !f->last_display.empty()) {
+            f->last_text = seconds_only ? seg7::format_seconds_only(f->last_display)
+                                        : f->last_display;
+        }
+        existing_text = f->last_text;
+    }
+    if ((target_changed || format_changed) && !existing_text.empty() &&
+        !set_text_source(target_name, existing_text)) {
+        std::lock_guard<std::mutex> lock(f->mutex);
+        f->status = target_name.empty() ? "Select a text source."
+                                        : "Text source missing or unsupported: " + target_name;
+    }
 }
 
 void clock_filter_defaults(obs_data_t *settings)
@@ -240,6 +373,8 @@ bool on_select_roi(obs_properties_t *props, obs_property_t *property, void *data
     auto *f = static_cast<ClockFilter *>(data);
     QImage image;
     int frame_w = 0, frame_h = 0;
+    QRect current;
+    bool tighten = false;
     {
         std::lock_guard<std::mutex> lock(f->mutex);
         if (!f->frame_gray.empty()) {
@@ -249,6 +384,15 @@ bool on_select_roi(obs_properties_t *props, obs_property_t *property, void *data
             frame_w = f->frame_w;
             frame_h = f->frame_h;
         }
+        current = QRect(f->roi_x, f->roi_y, f->roi_w, f->roi_h);
+        if (f->roi_frame_w > 0 && f->roi_frame_h > 0 &&
+            (f->roi_frame_w != frame_w || f->roi_frame_h != frame_h)) {
+            current = QRect((int)((double)current.x() * frame_w / f->roi_frame_w),
+                            (int)((double)current.y() * frame_h / f->roi_frame_h),
+                            (int)((double)current.width() * frame_w / f->roi_frame_w),
+                            (int)((double)current.height() * frame_h / f->roi_frame_h));
+        }
+        tighten = f->tighten;
     }
     if (image.isNull()) {
         QMessageBox::warning(QApplication::activeWindow(), "Clock Reader",
@@ -257,22 +401,28 @@ bool on_select_roi(obs_properties_t *props, obs_property_t *property, void *data
                              "and showing video, then try again.");
         return false;
     }
-    QRect current(f->roi_x, f->roi_y, f->roi_w, f->roi_h);
     RoiPickerDialog dialog(image, current, QApplication::activeWindow());
     if (dialog.exec() != QDialog::Accepted)
         return false;
     QRect rect = dialog.selected();
+    rect = rect.intersected(QRect(0, 0, image.width(), image.height()));
     if (rect.width() < 8 || rect.height() < 8)
         return false;
-    if (f->tighten && rect.width() > 0 && rect.height() > 0) {
-        std::lock_guard<std::mutex> lock(f->mutex);
-        if (!f->frame_gray.empty()) {
-            seg7::Rect tight = seg7::tighten_roi(
-                f->frame_gray.data() + (size_t)rect.y() * f->frame_w + rect.x(),
-                rect.width(), rect.height(), f->frame_w);
-            if (tight.w > 0 && tight.h > 0)
-                rect = QRect(rect.x() + tight.x, rect.y() + tight.y, tight.w, tight.h);
-        }
+    if (tighten && rect.x() >= 0 && rect.y() >= 0 && rect.right() < image.width() &&
+        rect.bottom() < image.height()) {
+        seg7::Rect tight = seg7::tighten_roi(image.constBits() + (size_t)rect.y() * image.bytesPerLine() + rect.x(),
+                                             rect.width(), rect.height(), image.bytesPerLine());
+        if (tight.w > 0 && tight.h > 0)
+            rect = QRect(rect.x() + tight.x, rect.y() + tight.y, tight.w, tight.h);
+    }
+    seg7::Reading preview = seg7::decode(
+        image.constBits() + (size_t)rect.y() * image.bytesPerLine() + rect.x(),
+        rect.width(), rect.height(), image.bytesPerLine());
+    if (!preview.digits.empty() && preview.digits.size() < 3) {
+        QMessageBox::warning(QApplication::activeWindow(), "Clock Reader",
+                             "This ROI contains only part of the clock.\n\n"
+                             "Select the complete minutes and seconds display, including its separator.");
+        return false;
     }
     obs_data_t *settings = obs_source_get_settings(f->source);
     obs_data_set_int(settings, S_ROI_X, rect.x());
@@ -305,14 +455,19 @@ obs_properties_t *clock_filter_properties(void *data)
     std::vector<std::string> names;
     obs_enum_sources(enum_text_sources, &names);
     std::sort(names.begin(), names.end());
+    std::string current_target;
+    {
+        std::lock_guard<std::mutex> lock(f->mutex);
+        current_target = f->target;
+    }
     bool found = false;
     for (auto &name : names) {
         obs_property_list_add_string(target, name.c_str(), name.c_str());
-        if (name == f->target)
+        if (name == current_target)
             found = true;
     }
-    if (!f->target.empty() && !found)
-        obs_property_list_add_string(target, f->target.c_str(), f->target.c_str());
+    if (!current_target.empty() && !found)
+        obs_property_list_add_string(target, current_target.c_str(), current_target.c_str());
 
     obs_properties_add_bool(props, S_SECONDS, "Show seconds only (drop tenths)");
     obs_property_t *direction = obs_properties_add_list(
@@ -326,6 +481,9 @@ obs_properties_t *clock_filter_properties(void *data)
     {
         std::lock_guard<std::mutex> lock(f->mutex);
         status = f->status;
+        if (f->last_frame_wall.time_since_epoch().count() != 0 &&
+            std::chrono::steady_clock::now() - f->last_frame_wall > std::chrono::seconds(3))
+            status = "No video frames for over 3 seconds; holding last value.";
     }
     obs_property_t *info = obs_properties_add_text(props, "status", status.c_str(),
                                                    OBS_TEXT_INFO);
