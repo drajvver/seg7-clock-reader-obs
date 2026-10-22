@@ -1,12 +1,11 @@
 name: Budowanie i wydanie dla Windows
+# Windows runners are expensive: build only when a release is published.
+# "Run workflow" in the Actions tab still allows a manual test build of any
+# branch (the zip is then only attached to the run as an artifact).
 on:
+  release:
+    types: [published]
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
-    tags:
-      - "*"
 permissions:
   contents: write
 jobs:
@@ -41,13 +40,15 @@ jobs:
           path: release/*.zip
           if-no-files-found: error
 
-      - name: Opublikuj wydanie
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Dołącz paczkę do wydania
+        if: github.event_name == 'release'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
+          $tag = $env:RELEASE_TAG
           $zip = (Get-ChildItem release/*.zip | Select-Object -First 1).FullName
           $notes = @"
           Czytnik zegara 7-segmentowego do OBS Studio (Windows x64).
@@ -73,7 +74,10 @@ jobs:
             $notesFile = Join-Path $env:RUNNER_TEMP 'seg7-release-notes.md'
             Set-Content -Path $notesFile -Value $notes -Encoding utf8
           }
-          gh release create $tag $zip --title "Czytnik zegara 7-segmentowego $tag" --notes-file $notesFile --verify-tag
-          if ($LASTEXITCODE -ne 0) {
-            gh release upload $tag $zip --clobber
+          gh release upload $tag $zip --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Keep notes written in the release; fill them in only when left empty.
+          if ([string]::IsNullOrWhiteSpace($env:RELEASE_BODY)) {
+            gh release edit $tag --notes-file $notesFile
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }

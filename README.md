@@ -146,7 +146,7 @@ Na macOS można też użyć `make test`. Polecenie `make test-obs` dodatkowo spr
 
 Testy obejmują syntetyczne obrazy zegarów prostych i pochylonych, wszystkie sekundy od `00` do `59`, dziesiąte części sekundy, nieprawidłowe zaznaczenia, zatrzymanie zegara i odzyskiwanie odczytu po zmianie obrazu. Testy integracyjne sprawdzają m.in. odwrócone klatki, formaty pikseli, listę źródeł tekstowych i pomijanie zbędnych aktualizacji tekstu. Nie zastępują sprawdzenia własnego nagrania w OBS.
 
-Automatyczne testy rdzenia uruchamiają się na Windows, macOS i Linux. Publikowanie znacznika wersji uruchamia budowę wydania Windows.
+Automatyczne testy rdzenia uruchamiają się na Windows, macOS i Linux. Paczka dla Windows jest budowana dopiero po opublikowaniu wydania (Releases → Draft a new release → Publish) i dołączana do niego automatycznie; zwykłe wypchnięcie zmian nie uruchamia tej budowy. Budowę testową dowolnej gałęzi można uruchomić ręcznie w zakładce Actions (Run workflow).
 
 ### Pliki projektu
 
