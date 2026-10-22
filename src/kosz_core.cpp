@@ -968,7 +968,7 @@ Reading decode(const uint8_t *gray, int width, int height, int stride) {
     double conf = 0.0;
     for (double c : confidences)
         conf += c;
-    r.confidence = conf / confidences.size();
+    r.confidence = conf / (double)confidences.size();
     // A digit cut by the ROI edge can still look like a valid digit (a
     // clipped 2 reads as 1), so require a margin around the clock.
     for (auto &g : final_objects)
