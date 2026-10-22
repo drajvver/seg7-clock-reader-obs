@@ -57,7 +57,8 @@ jobs:
           Jeśli folder ``plugins`` nie istnieje, utwórz go. Następnie uruchom OBS.
 
           Pierwsze uruchomienie: dodaj źródło Tekst (GDI+) lub Tekst (FreeType 2).
-          Do źródła z filmem lub kamerą dodaj filtr „Czytnik zegara 7-segmentowego”.
+          Do źródła z filmem lub kamerą dodaj filtr „Czytnik zegara 7-segmentowego (Futsal)”
+          albo „Czytnik zegara 7-segmentowego (Kosz)” dla tablicy koszykarskiej.
           Wybierz źródło tekstu i kliknij „Zaznacz zegar na obrazie…”.
           Zaznacz całe minuty i sekundy z dwukropkiem, np. 1:23.
 

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "clock_core.h"
+#include "kosz_core.h"
 #include "roi-picker.hpp"
 
 namespace {
@@ -33,8 +34,12 @@ constexpr const char *S_DIRECTION = "direction";
 constexpr const char *S_TARGET = "target_source";
 constexpr int MAX_FRAME_SIZE = 16384;
 
+// Each board type is a separate filter with its own decoder.
+enum class Board { Futsal, Kosz };
+
 struct ClockFilter {
     obs_source_t *source = nullptr;
+    Board board = Board::Futsal;
 
     int roi_x = 0, roi_y = 0, roi_w = 0, roi_h = 0;
     int roi_frame_w = 0, roi_frame_h = 0;
@@ -66,6 +71,22 @@ seg7::ClockTracker::Direction tracker_direction(int value)
     if (value < 0)
         return seg7::ClockTracker::Direction::Down;
     return seg7::ClockTracker::Direction::Auto;
+}
+
+seg7::ClockTracker make_tracker(Board board, int direction)
+{
+    seg7::ClockTracker tracker(tracker_direction(direction));
+    // The basketball board is often covered by players: after a long gap,
+    // confirm the clock again instead of taking the first reading that fits.
+    if (board == Board::Kosz)
+        tracker.confirm_after_gap = 2.0;
+    return tracker;
+}
+
+seg7::Reading decode_board(Board board, const uint8_t *gray, int width, int height, int stride)
+{
+    return board == Board::Kosz ? kosz::decode(gray, width, height, stride)
+                                : seg7::decode(gray, width, height, stride);
 }
 
 int bounded_setting(obs_data_t *settings, const char *name, int minimum = 0,
@@ -248,7 +269,7 @@ void process_frame(ClockFilter *f, const struct obs_source_frame *frame)
             return;
         }
     }
-    seg7::Reading reading = seg7::decode(f->crop_gray.data(), rw, rh, rw);
+    seg7::Reading reading = decode_board(f->board, f->crop_gray.data(), rw, rh, rw);
     double t = (double)frame->timestamp / 1e9;
     if (f->last_timestamp >= 0.0 && t + 0.001 < f->last_timestamp)
         f->tracker.reset();
@@ -311,27 +332,43 @@ void clock_filter_tick(void *data, float)
     }
 }
 
-const char *clock_filter_name(void *)
+const char *clock_filter_name_futsal(void *)
 {
-    return "Czytnik zegara 7-segmentowego";
+    return "Czytnik zegara 7-segmentowego (Futsal)";
 }
 
-void *clock_filter_create(obs_data_t *settings, obs_source_t *source)
+const char *clock_filter_name_kosz(void *)
+{
+    return "Czytnik zegara 7-segmentowego (Kosz)";
+}
+
+void *clock_filter_create(obs_data_t *settings, obs_source_t *source, Board board)
 {
     auto *f = new ClockFilter();
     f->source = source;
+    f->board = board;
     f->roi_x = bounded_setting(settings, S_ROI_X);
     f->roi_y = bounded_setting(settings, S_ROI_Y);
     f->roi_w = bounded_setting(settings, S_ROI_W);
     f->roi_h = bounded_setting(settings, S_ROI_H);
     f->roi_frame_w = bounded_setting(settings, S_ROI_FW);
     f->roi_frame_h = bounded_setting(settings, S_ROI_FH);
-    f->tighten = obs_data_get_bool(settings, S_TIGHTEN);
+    f->tighten = board == Board::Futsal && obs_data_get_bool(settings, S_TIGHTEN);
     f->seconds_only = obs_data_get_bool(settings, S_SECONDS);
     f->direction = bounded_setting(settings, S_DIRECTION, -1, 1);
     f->target = obs_data_get_string(settings, S_TARGET);
-    f->tracker = seg7::ClockTracker(tracker_direction(f->direction));
+    f->tracker = make_tracker(board, f->direction);
     return f;
+}
+
+void *clock_filter_create_futsal(obs_data_t *settings, obs_source_t *source)
+{
+    return clock_filter_create(settings, source, Board::Futsal);
+}
+
+void *clock_filter_create_kosz(obs_data_t *settings, obs_source_t *source)
+{
+    return clock_filter_create(settings, source, Board::Kosz);
 }
 
 void clock_filter_destroy(void *data)
@@ -350,7 +387,7 @@ void clock_filter_update(void *data, obs_data_t *settings)
     int frame_h = bounded_setting(settings, S_ROI_FH);
     int direction = bounded_setting(settings, S_DIRECTION, -1, 1);
     bool seconds_only = obs_data_get_bool(settings, S_SECONDS);
-    bool tighten = obs_data_get_bool(settings, S_TIGHTEN);
+    bool tighten = f->board == Board::Futsal && obs_data_get_bool(settings, S_TIGHTEN);
     const char *target = obs_data_get_string(settings, S_TARGET);
     std::string target_name = target ? target : "";
     {
@@ -375,7 +412,7 @@ void clock_filter_update(void *data, obs_data_t *settings)
         f->target = target_name;
 
         if (roi_changed || direction_changed) {
-            f->tracker = seg7::ClockTracker(tracker_direction(direction));
+            f->tracker = make_tracker(f->board, direction);
             f->last_text.clear();
             f->last_display.clear();
             f->last_timestamp = -1.0;
@@ -462,8 +499,8 @@ bool on_select_roi(obs_properties_t *props, obs_property_t *property, void *data
         if (tight.w > 0 && tight.h > 0)
             rect = QRect(rect.x() + tight.x, rect.y() + tight.y, tight.w, tight.h);
     }
-    seg7::Reading preview = seg7::decode(
-        image.constBits() + (size_t)rect.y() * image.bytesPerLine() + rect.x(),
+    seg7::Reading preview = decode_board(
+        f->board, image.constBits() + (size_t)rect.y() * image.bytesPerLine() + rect.x(),
         rect.width(), rect.height(), image.bytesPerLine());
     if (!preview.digits.empty() && preview.digits.size() < 3) {
         show_warning("Zaznaczono tylko część zegara.\n\n"
@@ -483,7 +520,7 @@ bool on_select_roi(obs_properties_t *props, obs_property_t *property, void *data
     return true;
 }
 
-obs_properties_t *clock_filter_properties(void *data)
+obs_properties_t *clock_filter_properties(void *data, Board board)
 {
     auto *f = static_cast<ClockFilter *>(data);
     obs_properties_t *props = obs_properties_create();
@@ -525,11 +562,14 @@ obs_properties_t *clock_filter_properties(void *data)
     obs_property_list_add_int(direction, "Automatycznie (zalecane)", 0);
     obs_property_list_add_int(direction, "Czas rośnie (0:00 → 0:01)", 1);
     obs_property_list_add_int(direction, "Czas maleje (1:00 → 0:59)", -1);
-    obs_property_t *tighten = obs_properties_add_bool(props, S_TIGHTEN,
-        "Dopasuj zaznaczenie do ciemnego tła zegara");
-    obs_property_set_long_description(tighten,
-        "Działa przy zatwierdzaniu zaznaczenia. Jeśli obcina cyfry, wyłącz tę opcję "
-        "i ponownie zaznacz zegar.");
+    // The basketball board has no separate dark panel around the clock to snap to.
+    if (board == Board::Futsal) {
+        obs_property_t *tighten = obs_properties_add_bool(props, S_TIGHTEN,
+            "Dopasuj zaznaczenie do ciemnego tła zegara");
+        obs_property_set_long_description(tighten,
+            "Działa przy zatwierdzaniu zaznaczenia. Jeśli obcina cyfry, wyłącz tę opcję "
+            "i ponownie zaznacz zegar.");
+    }
 
     obs_properties_t *manual = obs_properties_create();
     obs_properties_add_int(manual, S_ROI_X, "Od lewej krawędzi (piksele)", 0, MAX_FRAME_SIZE, 1);
@@ -568,21 +608,34 @@ struct obs_source_frame *clock_filter_video(void *data, struct obs_source_frame 
     return frame;
 }
 
-struct obs_source_info clock_filter_info = {};
-
-void init_clock_filter_info()
+obs_properties_t *clock_filter_properties_futsal(void *data)
 {
-    clock_filter_info.id = "seg7_clock_reader_filter";
-    clock_filter_info.type = OBS_SOURCE_TYPE_FILTER;
-    clock_filter_info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_ASYNC;
-    clock_filter_info.get_name = clock_filter_name;
-    clock_filter_info.create = clock_filter_create;
-    clock_filter_info.destroy = clock_filter_destroy;
-    clock_filter_info.get_defaults = clock_filter_defaults;
-    clock_filter_info.get_properties = clock_filter_properties;
-    clock_filter_info.update = clock_filter_update;
-    clock_filter_info.filter_video = clock_filter_video;
-    clock_filter_info.video_tick = clock_filter_tick;
+    return clock_filter_properties(data, Board::Futsal);
+}
+
+obs_properties_t *clock_filter_properties_kosz(void *data)
+{
+    return clock_filter_properties(data, Board::Kosz);
+}
+
+struct obs_source_info futsal_filter_info = {};
+struct obs_source_info kosz_filter_info = {};
+
+void init_filter_info(obs_source_info &info, const char *id, const char *(*get_name)(void *),
+                      void *(*create)(obs_data_t *, obs_source_t *),
+                      obs_properties_t *(*get_properties)(void *))
+{
+    info.id = id;
+    info.type = OBS_SOURCE_TYPE_FILTER;
+    info.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_ASYNC;
+    info.get_name = get_name;
+    info.create = create;
+    info.destroy = clock_filter_destroy;
+    info.get_defaults = clock_filter_defaults;
+    info.get_properties = get_properties;
+    info.update = clock_filter_update;
+    info.filter_video = clock_filter_video;
+    info.video_tick = clock_filter_tick;
 }
 
 }
@@ -591,8 +644,13 @@ OBS_DECLARE_MODULE()
 
 extern "C" bool obs_module_load(void)
 {
-    init_clock_filter_info();
-    obs_register_source(&clock_filter_info);
+    // The Futsal filter keeps the original id so existing scenes still load.
+    init_filter_info(futsal_filter_info, "seg7_clock_reader_filter", clock_filter_name_futsal,
+                     clock_filter_create_futsal, clock_filter_properties_futsal);
+    init_filter_info(kosz_filter_info, "seg7_clock_reader_kosz_filter", clock_filter_name_kosz,
+                     clock_filter_create_kosz, clock_filter_properties_kosz);
+    obs_register_source(&futsal_filter_info);
+    obs_register_source(&kosz_filter_info);
     blog(LOG_INFO, "[seg7-clock-reader] Wczytano czytnik zegara");
     return true;
 }

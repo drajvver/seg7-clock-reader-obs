@@ -42,7 +42,7 @@ endif()
 
 target_sources(
   ${CMAKE_PROJECT_NAME}
-  PRIVATE src/plugin-main.cpp src/roi-picker.cpp src/clock_core.cpp
+  PRIVATE src/plugin-main.cpp src/roi-picker.cpp src/clock_core.cpp src/kosz_core.cpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

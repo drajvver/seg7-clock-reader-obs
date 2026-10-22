@@ -157,11 +157,16 @@ void test_obs_callbacks()
         obs_shutdown();
         return;
     }
-    obs_properties_t *properties = clock_filter_properties(nullptr);
+    obs_properties_t *properties = clock_filter_properties_futsal(nullptr);
     check(properties && !obs_property_enabled(obs_properties_get(properties, "select_roi")),
           "source-type properties allow null implementation data");
     check(obs_property_list_item_count(obs_properties_get(properties, S_TARGET)) == 2,
           "versioned GDI+ text source listed");
+    check(obs_properties_get(properties, S_TIGHTEN) != nullptr, "Futsal offers ROI tightening");
+    obs_properties_destroy(properties);
+    properties = clock_filter_properties_kosz(nullptr);
+    check(properties && obs_properties_get(properties, S_TIGHTEN) == nullptr,
+          "Kosz properties allow null data and hide ROI tightening");
     obs_properties_destroy(properties);
 
     ClockFilter filter;
