@@ -4,6 +4,11 @@ Wtyczka odczytuje czas z zegara widocznego w filmie lub obrazie z kamery i wpisu
 
 Zegar powinien mieć jasne cyfry złożone z segmentów, jak w zegarku elektronicznym, na ciemnym tle. Zaznacz **cały czas z minutami i sekundami**, np. `1:23`, `12:34` lub `1:23.4`. Sam odczyt `5.2` albo zwykły napis drukowaną czcionką nie wystarczy.
 
+Wtyczka ma dwa niezależne filtry, każdy z własnym sposobem odczytu:
+
+- **Czytnik zegara 7-segmentowego (Futsal)** — zegar w jednej linii, np. `3:13.0`. To dotychczasowy filtr; istniejące sceny działają bez zmian.
+- **Czytnik zegara 7-segmentowego (Kosz)** — tablica koszykarska (np. ESK „GOSPODARZE – GOŚCIE”), na której czas ma dwukropek i mniejszą cyfrę dziesiątych części sekundy, np. `18:31.0`. Szczegóły w sekcji [Tablica koszykarska (Kosz)](#tablica-koszykarska-kosz).
+
 Wtyczka nie zmienia obrazu wideo. Gdy zegar się zatrzyma lub zniknie z obrazu, pozostawia ostatni odczyt. Po powrocie czytelnego zegara wznawia aktualizację.
 
 ## Czego potrzebujesz
@@ -43,12 +48,12 @@ Nie twórz drugiego folderu `seg7-clock-reader` wewnątrz pierwszego. Przy aktua
 
 1. W panelu **Źródła** kliknij **+** i dodaj **Tekst (GDI+)** albo **Tekst (FreeType 2)**. Nazwij go np. **Czas meczu**. Wyłącz **Czytaj z pliku**, jeśli ta opcja jest dostępna; w FreeType 2 wybierz sposób wprowadzania tekstu **Własne**.
 2. Dodaj lub włącz źródło z filmem albo kamerą. Sprawdź, czy zegar jest widoczny w podglądzie OBS.
-3. Kliknij to **źródło wideo** prawym przyciskiem myszy i wybierz **Filtry**. Pod listą **Filtry audio/wideo** kliknij **+** i wybierz **Czytnik zegara 7-segmentowego**. Filtr należy do źródła wideo, a nie do źródła tekstowego.
+3. Kliknij to **źródło wideo** prawym przyciskiem myszy i wybierz **Filtry**. Pod listą **Filtry audio/wideo** kliknij **+** i wybierz **Czytnik zegara 7-segmentowego (Futsal)** albo **(Kosz)** — zależnie od tablicy. Filtr należy do źródła wideo, a nie do źródła tekstowego.
 4. W polu **Gdzie wyświetlić czas?** wybierz **Czas meczu**.
 5. Kliknij **Zaznacz zegar na obrazie…**. Przeciągnij lewym przyciskiem ramkę wokół minut, sekund i separatorów. Pozostaw mały margines wokół cyfr. Nie obejmuj wyniku meczu ani innych napisów.
 6. Kliknij **Użyj tego obszaru**. Jeśli film jest zatrzymany, uruchom go na chwilę — czytnik potrzebuje kilku kolejnych klatek, żeby potwierdzić pierwszy odczyt. Po rozpoznaniu czasu pojawi się on w źródle **Czas meczu**. Ustaw jego czcionkę, kolor, rozmiar i położenie tak jak dla każdego tekstu w OBS.
 
-W starszych wydaniach filtr może jeszcze występować pod nazwą **7-Segment Clock Reader**. Ta instrukcja opisuje interfejs bieżącego kodu.
+W starszych wydaniach filtr Futsal może jeszcze występować pod nazwą **Czytnik zegara 7-segmentowego** lub **7-Segment Clock Reader**. Ta instrukcja opisuje interfejs bieżącego kodu.
 
 ### Jak zaznaczyć mały zegar
 
@@ -65,10 +70,20 @@ Okno pokazuje zatrzymaną klatkę, żeby łatwiej było zaznaczyć cyfry. Po zat
 | --- | --- |
 | **Ukryj dziesiąte części sekundy** | Pokazuje np. `1:23` zamiast `1:23.4`. Domyślnie włączone. Minuty pozostają widoczne. |
 | **Jak zmienia się czas?** | Zwykle pozostaw **Automatycznie**. Jeśli wiesz, że zegar zawsze odlicza do zera, możesz wybrać **Czas maleje**. |
-| **Dopasuj zaznaczenie do ciemnego tła zegara** | Przy zatwierdzaniu próbuje dokładniej dopasować ramkę do wyświetlacza. Jeśli obcina cyfry, wyłącz i zaznacz zegar ponownie. |
+| **Dopasuj zaznaczenie do ciemnego tła zegara** | Tylko w filtrze Futsal. Przy zatwierdzaniu próbuje dokładniej dopasować ramkę do wyświetlacza. Jeśli obcina cyfry, wyłącz i zaznacz zegar ponownie. |
 | **Ręczne ustawienie obszaru** | Pozwala wpisać położenie i rozmiar zaznaczenia w pikselach. Nie musisz tego używać — wystarczy zaznaczenie myszą. |
 
 Przy zmianie rozdzielczości źródła zaznaczenie skaluje się automatycznie. Jeśli zmieni się położenie zegara lub układ transmisji, zaznacz zegar ponownie.
+
+## Tablica koszykarska (Kosz)
+
+Filtr **Kosz** jest przygotowany dla tablic z czerwonym czasem `MM:SS`, dwukropkiem i osobną, mniejszą cyfrą dziesiątych części sekundy, otoczonych żółtymi licznikami (wynik, faule).
+
+- Zaznacz **sam czerwony czas razem z cyfrą dziesiątych**, np. `18:31.0`. Nie obejmuj żółtych liczników fauli po bokach ani wyniku nad zegarem.
+- Cyfry z matrycy LED, lekko przechylona tablica i kropka dziesiętna stykająca się z cyfrą są obsługiwane.
+- Gdy zawodnik zasłoni część zegara, odczyt jest odrzucany zamiast pokazać błędny czas. Po dłuższej przerwie (np. kamera odwrócona od tablicy) wtyczka czeka na kilka zgodnych odczytów, zanim zaktualizuje tekst.
+- Rozpoznawane układy: `MM:SS.t`, `M:SS.t`, `MM:SS` i `SS.t`.
+- Cyfry zegara powinny mieć na obrazie co najmniej ok. 25 pikseli wysokości.
 
 ## Gdy coś nie działa
 
@@ -131,11 +146,12 @@ Na macOS można też użyć `make test`. Polecenie `make test-obs` dodatkowo spr
 
 Testy obejmują syntetyczne obrazy zegarów prostych i pochylonych, wszystkie sekundy od `00` do `59`, dziesiąte części sekundy, nieprawidłowe zaznaczenia, zatrzymanie zegara i odzyskiwanie odczytu po zmianie obrazu. Testy integracyjne sprawdzają m.in. odwrócone klatki, formaty pikseli, listę źródeł tekstowych i pomijanie zbędnych aktualizacji tekstu. Nie zastępują sprawdzenia własnego nagrania w OBS.
 
-Automatyczne testy rdzenia uruchamiają się na Windows, macOS i Linux. Publikowanie znacznika wersji uruchamia budowę wydania Windows.
+Automatyczne testy rdzenia uruchamiają się na Windows, macOS i Linux. Paczka dla Windows jest budowana dopiero po opublikowaniu wydania (Releases → Draft a new release → Publish) i dołączana do niego automatycznie; zwykłe wypchnięcie zmian nie uruchamia tej budowy. Budowę testową dowolnej gałęzi można uruchomić ręcznie w zakładce Actions (Run workflow).
 
 ### Pliki projektu
 
-- `src/clock_core.cpp` — odczyt cyfr i śledzenie czasu; przenośny C++17.
+- `src/clock_core.cpp` — odczyt cyfr (Futsal) i śledzenie czasu; przenośny C++17.
+- `src/kosz_core.cpp` — odczyt tablicy koszykarskiej (Kosz), niezależny od dekodera Futsal.
 - `src/plugin-main.cpp` — integracja z OBS i ustawienia filtra.
 - `src/roi-picker.cpp` — okno zaznaczania zegara.
 - `tests/` — testy regresji dekodera, śledzenia czasu i integracji z OBS.

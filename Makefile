@@ -11,7 +11,7 @@ BUILD := build
 BUNDLE := $(BUILD)/$(PLUGIN).plugin
 BIN := $(BUNDLE)/Contents/MacOS/$(PLUGIN)
 
-SRCS := src/plugin-main.cpp src/roi-picker.cpp src/clock_core.cpp
+SRCS := src/plugin-main.cpp src/roi-picker.cpp src/clock_core.cpp src/kosz_core.cpp
 OBJS := $(addprefix $(BUILD)/,$(addsuffix .o,$(notdir $(basename $(SRCS)))))
 
 CXXFLAGS := -std=c++17 -O2 -fPIC $(ARCHFLAGS) -mmacosx-version-min=13.0 \
@@ -45,8 +45,8 @@ $(BUILD)/clock_core_tests: tests/clock_core_tests.cpp src/clock_core.cpp src/clo
 test-obs: $(BUILD)/plugin_tests
 	$(BUILD)/plugin_tests
 
-$(BUILD)/plugin_tests: tests/plugin_tests.cpp $(SRCS) src/clock_core.h src/roi-picker.hpp | $(BUILD)
-	$(CXX) $(CXXFLAGS) $(TEST_CXXFLAGS) tests/plugin_tests.cpp src/clock_core.cpp src/roi-picker.cpp \
+$(BUILD)/plugin_tests: tests/plugin_tests.cpp $(SRCS) src/clock_core.h src/kosz_core.h src/roi-picker.hpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(TEST_CXXFLAGS) tests/plugin_tests.cpp src/clock_core.cpp src/kosz_core.cpp src/roi-picker.cpp \
 		-F$(OBS_APP) -framework libobs -framework QtWidgets -framework QtGui -framework QtCore \
 		-Wl,-rpath,$(OBS_APP) -o $@
 

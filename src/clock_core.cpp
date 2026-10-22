@@ -1007,7 +1007,8 @@ TrackState ClockTracker::update(const Reading &reading, double t) {
     if (has_value_) {
         double dt = std::max(t - t_, 0.001);
         double delta = value - value_;
-        if (plausible(delta, dt)) {
+        bool after_gap = confirm_after_gap > 0.0 && dt > confirm_after_gap;
+        if (!after_gap && plausible(delta, dt)) {
             vote_direction(delta);
             bool changed = accept(value, reading, t);
             return state(t, changed);

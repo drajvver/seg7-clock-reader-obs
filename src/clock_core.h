@@ -80,6 +80,10 @@ public:
     double stopped_after = 1.5;
     double direction_evidence = 0.1;
     double stale_after = 3.0;
+    // Opt-in (Kosz): after a gap longer than this many seconds without an
+    // accepted reading, confirm the next value like a jump instead of taking
+    // any value that fits the elapsed time. 0 disables.
+    double confirm_after_gap = 0.0;
 
 private:
     bool plausible(double delta, double dt) const;
